@@ -38,7 +38,9 @@ pub fn run() -> i32 {
   eprintln!();
   eprintln!(
     "{}",
-    "https://envrs.github.io/synopkg/guide/migrate-v14#set-semver-ranges-fix".blue().underline()
+    "https://envrs.github.io/synopkg/guide/migrate-v14#set-semver-ranges-fix"
+      .blue()
+      .underline()
   );
   eprintln!();
   1

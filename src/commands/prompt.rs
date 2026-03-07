@@ -24,7 +24,12 @@ pub fn run() -> i32 {
   eprintln!("  {}", "# v14".dimmed());
   eprintln!("  {}", "# Not yet implemented".red());
   eprintln!();
-  eprintln!("{}", "https://envrs.github.io/synopkg/guide/migrate-v14#prompt-removed".blue().underline());
+  eprintln!(
+    "{}",
+    "https://envrs.github.io/synopkg/guide/migrate-v14#prompt-removed"
+      .blue()
+      .underline()
+  );
   eprintln!();
   1
 }

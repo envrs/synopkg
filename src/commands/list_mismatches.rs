@@ -29,7 +29,9 @@ pub fn run() -> i32 {
   eprintln!();
   eprintln!(
     "{}",
-    "https://envrs.github.io/synopkg/guide/migrate-v14#list-mismatches-lint".blue().underline()
+    "https://envrs.github.io/synopkg/guide/migrate-v14#list-mismatches-lint"
+      .blue()
+      .underline()
   );
   eprintln!();
   1
