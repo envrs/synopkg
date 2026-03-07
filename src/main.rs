@@ -118,7 +118,10 @@ async fn main() {
     Subcommand::LintSemverRanges => lint_semver_ranges::run(),
     Subcommand::FixMismatches => fix_mismatches::run(),
     Subcommand::SetSemverRanges => set_semver_ranges::run(),
-    Subcommand::Prompt => prompt::run(),
+    Subcommand::Prompt => {
+      let ctx = visit_packages(ctx);
+      prompt::run(ctx)
+    }
   };
 
   exit(_exit_code);
