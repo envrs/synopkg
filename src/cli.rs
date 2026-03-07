@@ -8,6 +8,21 @@ use {
 };
 
 #[derive(Debug)]
+pub enum CliError {
+  CurrentDirFailed(String),
+}
+
+impl std::error::Error for CliError {}
+
+impl std::fmt::Display for CliError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      CliError::CurrentDirFailed(msg) => write!(f, "Failed to get current directory: {}", msg),
+    }
+  }
+}
+
+#[derive(Debug)]
 pub enum Subcommand {
   Lint,
   Fix,
@@ -84,12 +99,12 @@ pub struct Cli {
 
 impl Cli {
   /// Parse all command-line arguments from the user into a `Cli` struct
-  pub fn parse() -> Self {
-    fn from_arg_matches(subcommand: Subcommand, matches: &ArgMatches) -> Cli {
-      Cli {
+  pub fn parse() -> Result<Self, Box<dyn std::error::Error>> {
+    fn from_arg_matches(subcommand: Subcommand, matches: &ArgMatches) -> Result<Cli, Box<dyn std::error::Error>> {
+      Ok(Cli {
         check: (matches!(&subcommand, Subcommand::Format | Subcommand::Update)) && matches.get_flag("check"),
         config_path: matches.get_one::<String>("config").cloned(),
-        cwd: env::current_dir().unwrap(),
+        cwd: env::current_dir().map_err(|e| Box::new(CliError::CurrentDirFailed(e.to_string())))?,
         dependencies: get_patterns(matches, "dependencies"),
         dependency_types: get_patterns(matches, "dependency-types"),
         disable_ansi: matches.get_flag("no-ansi"),
@@ -105,7 +120,30 @@ impl Cli {
         specifier_types: get_patterns(matches, "specifier-types"),
         subcommand,
         target: get_target(matches),
-      }
+      })
+    }
+
+    fn create_default_cli(subcommand: Subcommand) -> Result<Cli, Box<dyn std::error::Error>> {
+      Ok(Cli {
+        check: false,
+        config_path: None,
+        cwd: env::current_dir().map_err(|e| Box::new(CliError::CurrentDirFailed(e.to_string())))?,
+        dependencies: vec![],
+        dependency_types: vec![],
+        disable_ansi: false,
+        dry_run: false,
+        log_levels: vec![],
+        packages: vec![],
+        show_hints: false,
+        show_ignored: false,
+        show_instances: false,
+        show_status_codes: false,
+        sort: SortBy::Name,
+        source_patterns: vec![],
+        specifier_types: vec![],
+        subcommand,
+        target: UpdateTarget::Latest,
+      })
     }
 
     match create().get_matches().subcommand() {
@@ -115,106 +153,11 @@ impl Cli {
       Some(("update", matches)) => from_arg_matches(Subcommand::Update, matches),
       Some(("list", matches)) => from_arg_matches(Subcommand::List, matches),
       Some(("json", matches)) => from_arg_matches(Subcommand::Json, matches),
-      Some(("list-mismatches", _)) => Cli {
-        check: false,
-        config_path: None,
-        cwd: env::current_dir().unwrap(),
-        dependencies: vec![],
-        dependency_types: vec![],
-        disable_ansi: false,
-        dry_run: false,
-        log_levels: vec![],
-        packages: vec![],
-        show_hints: false,
-        show_ignored: false,
-        show_instances: false,
-        show_status_codes: false,
-        sort: SortBy::Name,
-        source_patterns: vec![],
-        specifier_types: vec![],
-        subcommand: Subcommand::ListMismatches,
-        target: UpdateTarget::Latest,
-      },
-      Some(("lint-semver-ranges", _)) => Cli {
-        check: false,
-        config_path: None,
-        cwd: env::current_dir().unwrap(),
-        dependencies: vec![],
-        dependency_types: vec![],
-        disable_ansi: false,
-        dry_run: false,
-        log_levels: vec![],
-        packages: vec![],
-        show_hints: false,
-        show_ignored: false,
-        show_instances: false,
-        show_status_codes: false,
-        sort: SortBy::Name,
-        source_patterns: vec![],
-        specifier_types: vec![],
-        subcommand: Subcommand::LintSemverRanges,
-        target: UpdateTarget::Latest,
-      },
-      Some(("fix-mismatches", _)) => Cli {
-        check: false,
-        config_path: None,
-        cwd: env::current_dir().unwrap(),
-        dependencies: vec![],
-        dependency_types: vec![],
-        disable_ansi: false,
-        dry_run: false,
-        log_levels: vec![],
-        packages: vec![],
-        show_hints: false,
-        show_ignored: false,
-        show_instances: false,
-        show_status_codes: false,
-        sort: SortBy::Name,
-        source_patterns: vec![],
-        specifier_types: vec![],
-        subcommand: Subcommand::FixMismatches,
-        target: UpdateTarget::Latest,
-      },
-      Some(("set-semver-ranges", _)) => Cli {
-        check: false,
-        config_path: None,
-        cwd: env::current_dir().unwrap(),
-        dependencies: vec![],
-        dependency_types: vec![],
-        disable_ansi: false,
-        dry_run: false,
-        log_levels: vec![],
-        packages: vec![],
-        show_hints: false,
-        show_ignored: false,
-        show_instances: false,
-        show_status_codes: false,
-        sort: SortBy::Name,
-        source_patterns: vec![],
-        specifier_types: vec![],
-        subcommand: Subcommand::SetSemverRanges,
-        target: UpdateTarget::Latest,
-      },
-      Some(("prompt", _)) => Cli {
-        check: false,
-        config_path: None,
-        cwd: env::current_dir().unwrap(),
-        dependencies: vec![],
-        dependency_types: vec![],
-        disable_ansi: false,
-        dry_run: false,
-        log_levels: vec![],
-        packages: vec![],
-        show_hints: false,
-        show_ignored: false,
-        show_instances: false,
-        show_status_codes: false,
-        sort: SortBy::Name,
-        source_patterns: vec![],
-        specifier_types: vec![],
-        subcommand: Subcommand::Prompt,
-        target: UpdateTarget::Latest,
-      },
+      Some(("list-mismatches", _)) => create_default_cli(Subcommand::ListMismatches),
+      Some(("lint-semver-ranges", _)) => create_default_cli(Subcommand::LintSemverRanges),
+      Some(("fix-mismatches", _)) => create_default_cli(Subcommand::FixMismatches),
+      Some(("set-semver-ranges", _)) => create_default_cli(Subcommand::SetSemverRanges),
+      Some(("prompt", _)) => create_default_cli(Subcommand::Prompt),
       _ => {
         std::process::exit(1);
       }

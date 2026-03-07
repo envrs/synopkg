@@ -48,7 +48,13 @@ mod visit_packages;
 
 #[tokio::main]
 async fn main() {
-  let cli = Cli::parse();
+  let cli = match Cli::parse() {
+    Ok(cli) => cli,
+    Err(e) => {
+      eprintln!("Error: {}", e);
+      std::process::exit(1);
+    }
+  };
 
   logger::init(&cli);
 

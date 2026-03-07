@@ -1,7 +1,7 @@
 {
   "name": "synopkg",
   "description": "Consistent dependency versions in large JavaScript Monorepos",
-  "version": "14.0.1",
+  "version": "14.0.2",
   "author": "envrs <dev.sulaiman@icloud.com> (https://github.com/synopkg)",
   "bugs": "https://github.com/envrs/synopkg/issues",
   "contributors": [
