@@ -27,7 +27,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '16' # Replace with the correct version
+          node-version: '22' # Replace with the correct version
           cache: 'pnpm'
 
       - name: Install Dependencies
