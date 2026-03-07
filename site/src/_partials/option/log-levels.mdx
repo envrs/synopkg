@@ -1,0 +1,22 @@
+import { Code } from "astro:components";
+
+Control how detailed the log output should be
+
+| Level | What is written to this channel                                          |
+| ----- | ------------------------------------------------------------------------ |
+| info  | The standard output which forms synopkg\'s UI, including lint issues    |
+| warn  | Possible mistakes in your setup, or highlights of known gaps in synopkg |
+| error | Fatal exceptions or errors outside the normal running of synopkg        |
+| debug | Extremely verbose detail on why synopkg assigns each status code        |
+
+<Code
+code={`
+# Turn off logging completely
+synopkg ${props.command} --log-levels off
+# Only show verbose debugging logs
+synopkg ${props.command} --log-levels debug
+# Show everything
+synopkg ${props.command} --log-levels error,warn,info,debug
+`.trim()}
+lang="bash"
+/>

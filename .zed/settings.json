@@ -1,24 +1,22 @@
 {
-  "ensure_final_newline_on_save": true,
+  "lsp": {
+    "rust-analyzer": {
+      "initialization_options": {
+        "check": {
+          "command": "clippy",
+        },
+      },
+    },
+  },
   "formatter": {
     "external": {
-      "command": "./node_modules/.bin/biome",
-      "arguments": ["check", "--stdin-file-path", "{buffer_path}", "--apply"]
-    }
+      "command": "node_modules/.bin/biome",
+      "arguments": ["format", "--stdin-file-path", "{buffer_path}"],
+    },
   },
-  "remove_trailing_whitespace_on_save": true,
-  "language_server": {
-    "enable": true,
-    "settings": {
-      "performance": {
-        "max_memory": 4096,
-        "max_cpu": 2
-      },
-      "features": {
-        "auto_complete": true,
-        "hover": true,
-        "signature_help": true
-      }
-    }
-  }
+  "languages": {
+    "Rust": {
+      "formatter": "language_server",
+    },
+  },
 }

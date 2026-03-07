@@ -1,0 +1,97 @@
+---
+title: Semver Groups
+description: Configure semver range formats for dependencies across your monorepo
+---
+
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+import { getCollection } from "astro:content";
+
+export const allDocs = await getCollection("docs");
+export const pages = allDocs
+  .filter(
+    (doc) => doc.id.startsWith("semver-groups/") && doc.id !== "semver-groups",
+  )
+  .sort((a, b) => a.data.title.localeCompare(b.data.title));
+
+Allow some packages to have different semver range rules to the rest of your monorepo. Each dependency can only belong to one semver group, the first rule which matches a given dependency and package will apply.
+
+## Examples
+
+1: Every dependency of `@myrepo/library` should have a semver range of `~`, regardless of what the rest of the monorepo uses:
+
+```json title=".synopkgrc.json"
+{
+  "semverGroups": [
+    {
+      "packages": ["@myrepo/library"],
+      "range": "~"
+    }
+  ]
+}
+```
+
+2: Every dependency of `@myrepo/library` whose name matches `@foo/**` should have a semver range of `^`, regardless of what the rest of that package or the rest of the monorepo uses:
+
+```json title=".synopkgrc.json"
+{
+  "semverGroups": [
+    {
+      "dependencies": ["@foo/**"],
+      "packages": ["@myrepo/library"],
+      "range": "^"
+    }
+  ]
+}
+```
+
+3: Every dependency in the monorepo whose name matches `@foo/**` should have a semver range of `~`, regardless of what the rest of the monorepo uses:
+
+```json title=".synopkgrc.json"
+{
+  "semverGroups": [
+    {
+      "dependencies": ["@foo/**"],
+      "range": "~"
+    }
+  ]
+}
+```
+
+4: Production dependencies should have fixed version numbers, but development and peer dependencies can be broader.
+
+```json title=".synopkgrc.json"
+{
+  "semverGroups": [
+    {
+      "dependencyTypes": [
+        "prod",
+        "resolutions",
+        "overrides",
+        "pnpmOverrides",
+        "local"
+      ],
+      "range": ""
+    },
+    {
+      "dependencyTypes": ["dev"],
+      "range": "~"
+    },
+    {
+      "dependencyTypes": ["peer"],
+      "range": "^"
+    }
+  ]
+}
+```
+
+## Variants
+
+<CardGrid>
+  {pages.map((page) => (
+    <LinkCard
+      title={page.data.title}
+      href={`/${page.id.replace(/\.mdx?$/, "")}/`}
+      description={page.data.description}
+    />
+  ))}
+</CardGrid>

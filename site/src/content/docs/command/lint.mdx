@@ -1,23 +1,86 @@
 ---
 title: lint
+description: Check for dependency version mismatches and semver range violations without modifying files
 ---
 
-import ConfigOption from '@site/partials/option/_config.mdx';
-import HelpOption from '@site/partials/option/_help.mdx';
-import LogLevelOption from '@site/partials/option/_log-level.mdx';
+import { Badge } from "@astrojs/starlight/components";
+import ConfigOption from "@partials/option/config.mdx";
+import DependenciesOption from "@partials/option/dependencies.mdx";
+import DependencyTypesOption from "@partials/option/dependency-types.mdx";
+import HelpOption from "@partials/option/help.mdx";
+import LogLevelsOption from "@partials/option/log-levels.mdx";
+import NoAnsiOption from "@partials/option/no-ansi.mdx";
+import QuoteFilters from "@partials/tips/quote-filters.mdx";
+import ShowOption from "@partials/option/show-versions.mdx";
+import SortOption from "@partials/option/sort.mdx";
+import SourceOption from "@partials/option/source.mdx";
+import SpecifierTypesOption from "@partials/option/specifier-types.mdx";
 
-Lint all versions and ranges and exit with 0 or 1 based on whether all files match your Synopkg configuration file.
+Check for version mismatches in your monorepo. Reports dependencies that don't match your configuration rules and exits with status code 1 if issues are found. Use `fix` to resolve reported issues. Does not check formatting—use `format --check` for that.
 
-## CLI Options
+## Examples
 
-### config
+```bash
+# Find all issues in "dependencies" or "devDependencies"
+synopkg lint --dependency-types prod,dev
+# Only lint issues in "react" specifically
+synopkg lint --dependencies react
+# Look for issues in dependencies containing "react" in the name
+synopkg lint --dependencies '**react**'
+# Find issues in scoped packages only
+synopkg lint --dependencies '@types/**'
+# Find issues everywhere except "peerDependencies"
+synopkg lint --dependency-types '!peer'
+# Only look for issues where an exact version is used (eg "1.2.3")
+synopkg lint --specifier-types exact
+# Sort dependencies by how many times they are used
+synopkg lint --sort count
+# See more examples
+synopkg lint --help
+# See a short summary of options
+synopkg lint -h
+```
+
+## Options
+
+<QuoteFilters />
+
+### --config <Badge text="<file-path>" />
 
 <ConfigOption command="lint" />
 
-### help
+### --dependencies <Badge text="<dependency-name-pattern>" />
+
+<DependenciesOption command="lint" />
+
+### --dependency-types <Badge text="<comma-separated-dependency-type-names>" />
+
+<DependencyTypesOption command="lint" />
+
+### --log-levels <Badge text="<comma-separated-log-level-names>" />
+
+<LogLevelsOption command="lint" />
+
+### --no-ansi
+
+<NoAnsiOption command="lint" />
+
+### --show <Badge text="<comma-separated-detail-names>" />
+
+<ShowOption command="lint" />
+
+### --sort <Badge text="<choice>" />
+
+<SortOption command="lint" />
+
+### --source <Badge text="<file-pattern>" />
+
+<SourceOption command="lint" />
+
+### --specifier-types <Badge text="<comma-separated-specifier-type-names>" />
+
+<SpecifierTypesOption command="lint" />
+
+### --help
 
 <HelpOption command="lint" />
-
-## Troubleshooting
-
-<LogLevelOption command="lint" />

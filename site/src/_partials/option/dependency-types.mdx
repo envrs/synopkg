@@ -1,0 +1,17 @@
+import { Code } from "astro:components";
+
+Include dependencies of the given [dependency types](REF_DEPENDENCY_TYPES) and/or [custom types](CONFIG_CUSTOM_TYPES).
+
+To exclude, put a `!` at the start of your query.
+
+<Code
+code={`
+# devDependencies only
+synopkg ${props.command} --dependency-types dev
+# dependencies and devDependencies only
+synopkg ${props.command} --dependency-types dev,prod
+# everything except peerDependencies
+synopkg ${props.command} --dependency-types '!peer'
+`.trim()}
+lang="bash"
+/>

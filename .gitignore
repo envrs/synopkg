@@ -1,12 +1,13 @@
+**/*.rs.bk
+*.log
+*.log.*
 .astro/
 .DS_Store
 .idea
-*.log
-*.log.*
-coverage
+coverage/
 dist/
+flamegraph.svg
+lcp_trace.json
 node_modules/
-
-# v14 branch
-npm
-target
+npm/packages/
+target/

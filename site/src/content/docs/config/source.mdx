@@ -1,25 +1,27 @@
 ---
 title: source
+description: Configure which package.json files synopkg should discover and process
 ---
 
-Patterns supported by [glob](https://github.com/isaacs/node-glob) to find package.json files you want to manage with synopkg.
+import HowPackagesAreResolved from "@partials/how-packages-are-resolved.mdx";
+import MonorepoNotEssentialTip from "@partials/tips/monorepo-not-essential.mdx";
 
-## Default Value
+A list of [Glob](HREF_GLOB) patterns to find package.json files you want to manage with synopkg.
 
-Defaulted to match most Projects using Lerna or Yarn Workspaces
+<MonorepoNotEssentialTip />
 
-```json title=".synopkgrc"
+## Example
+
+In this example we have a directory on our machine called `my-projects` where we `git clone` all of the repositories we work on for our company.
+
+Despite us not having a monorepo, a .synopkgrc.json placed alongside each `git clone` allows us to use synopkg to find and fix problems.
+
+```json title="~/my-projects/.synopkgrc.json"
 {
-  "source": ["package.json", "packages/*/package.json"]
+  "source": ["./*/package.json", "./*/packages/*/package.json"]
 }
 ```
 
 ## Resolving Packages
 
-package.json files are resolved in this order of precedence:
-
-1.  If `--source` [glob patterns](https://github.com/isaacs/node-glob#glob-primer) are provided, use those.
-2.  If using [Yarn Workspaces](https://yarnpkg.com/lang/en/docs/workspaces/), read `workspaces` from `./package.json`.
-3.  If using [Lerna](https://lerna.js.org/), read `packages` from `./lerna.json`.
-4.  If using [Pnpm](https://pnpm.js.org/), read `packages` from `./pnpm-workspace.yaml`.
-5.  Default to `'package.json'` and `'packages/*/package.json'`.
+<HowPackagesAreResolved />

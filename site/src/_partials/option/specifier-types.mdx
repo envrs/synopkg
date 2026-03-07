@@ -1,0 +1,17 @@
+import { Code } from "astro:components";
+
+Include only instances whose version specifiers are of the given [specifier types](REF_SPECIFIER_TYPES).
+
+To exclude, put a `!` at the start of your query.
+
+<Code
+code={`
+# Exact versions only
+synopkg ${props.command} --show instances --specifier-types exact
+# Missing or unsupported versions
+synopkg ${props.command} --show instances --specifier-types missing,unsupported
+# Latest or workspace protocol only
+synopkg ${props.command} --show instances --specifier-types latest,workspace-protocol
+`.trim()}
+lang="bash"
+/>

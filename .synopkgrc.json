@@ -1,0 +1,9 @@
+{
+  "$schema": "npm/packages/synopkg/schema.json",
+  "semverGroups": [
+    {
+      "dependencyTypes": ["prod", "dev"],
+      "range": "^"
+    }
+  ]
+}

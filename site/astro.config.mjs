@@ -1,40 +1,84 @@
+import { rehypeHeadingIds } from '@astrojs/markdown-remark';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
+import rehypeExternalLinks from 'rehype-external-links';
+import { headingAnchorLinks } from './remark-plugins/heading-anchor-links.mjs';
+import { linkAliases } from './remark-plugins/link-aliases.mjs';
+import { sectionWrapper } from './remark-plugins/section-wrapper.mjs';
+import { tocSchemaMicrodata } from './remark-plugins/toc-schema-microdata.mjs';
 
-// https://astro.build/config
 export default defineConfig({
-  site: 'https://synopkg.github.io/synopkg',
-  base: '/synopkg',
+  site: 'https://envrs.github.io/synopkg',
+  base: '/',
+  output: 'static',
+  markdown: {
+    smartypants: false,
+    rehypePlugins: [rehypeHeadingIds, headingAnchorLinks, [rehypeExternalLinks, { rel: ['nofollow', 'noopener'] }]],
+    remarkPlugins: [sectionWrapper, linkAliases],
+  },
   integrations: [
+    tocSchemaMicrodata(),
     starlight({
       title: 'Synopkg',
-      social: {
-        github: 'https://github.com/SynoPkg/synopkg',
-        twitter: 'https://twitter.com/fold_left',
+      lastUpdated: true,
+      markdown: {
+        headingLinks: false,
       },
+      routeMiddleware: './src/route-data.ts',
+      social: [
+        {
+          icon: 'github',
+          label: 'GitHub',
+          href: 'https://github.com/envrs/synopkg',
+        },
+        {
+          icon: 'npm',
+          label: 'npm',
+          href: 'https://npmx.dev/package/synopkg',
+        },
+        {
+          icon: 'blueSky',
+          label: 'Bluesky',
+          href: 'https://bsky.app/profile/foldleft.bsky.social',
+        },
+      ],
       editLink: {
-        baseUrl: 'https://github.com/SynoPkg/synopkg/edit/starlight/site/',
+        baseUrl: 'https://github.com/envrs/synopkg/edit/main/site/',
       },
       favicon: '/favicon.ico',
       logo: {
         src: './src/assets/logo.svg',
       },
-      components: {
-        Sidebar: './src/components/Sidebar.astro',
+      tableOfContents: {
+        minHeadingLevel: 2,
+        maxHeadingLevel: 4,
       },
-      customCss: ['./src/styles/custom.css'],
-      defaultLocale: 'en',
-      locales: {
-        en: {
-          label: 'English',
-          lang: 'en-GB',
+      expressiveCode: {
+        themes: ['everforest-dark', 'everforest-light'],
+        removeUnusedThemes: false,
+        frames: false,
+        styleOverrides: {
+          // Borders and spacing
+          borderRadius: '6px',
+          borderWidth: '1px',
+          borderColor: 'var(--sl-color-gray-5)',
+
+          // Code area
+          codeBackground: 'var(--sl-color-gray-6)',
+          codeFontFamily: 'var(--sl-font-mono)',
+          codeFontSize: '0.8rem',
+          codeLineHeight: '1.65',
+          codePaddingBlock: '1rem',
+          codePaddingInline: '1.35rem',
+          codeForeground: 'var(--sl-color-gray-2)',
+
+          // Accent color for highlights
+          focusBorder: 'var(--sl-color-accent)',
         },
       },
+      customCss: ['@fontsource-variable/inter', '@fontsource-variable/jetbrains-mono', './src/styles/custom.css'],
+      pagination: false,
       sidebar: [
-        {
-          label: 'Github',
-          link: 'https://github.com/SynoPkg/synopkg',
-        },
         {
           label: 'Guides',
           autogenerate: { directory: 'guide' },
@@ -44,32 +88,66 @@ export default defineConfig({
           autogenerate: { directory: 'command' },
         },
         {
-          label: 'Config',
-          autogenerate: { directory: 'config' },
+          label: 'Version Groups',
+          autogenerate: { directory: 'version-groups' },
         },
         {
-          label: 'Integrations',
-          autogenerate: { directory: 'integrations' },
+          label: 'Semver Groups',
+          autogenerate: { directory: 'semver-groups' },
         },
         {
-          label: 'Examples',
-          autogenerate: { directory: 'examples' },
+          label: 'Configuration File',
+          items: [
+            'config/synopkgrc',
+            'config/custom-types',
+            'config/dependency-groups',
+            'config/format-bugs',
+            'config/format-repository',
+            'config/indent',
+            'config/max-concurrent-requests',
+            { label: 'semverGroups', link: '/semver-groups/' },
+            'config/sort-az',
+            'config/sort-exports',
+            'config/sort-first',
+            'config/sort-packages',
+            'config/source',
+            'config/strict',
+            { label: 'versionGroups', link: '/version-groups/' },
+          ],
+        },
+        {
+          label: 'Reference',
+          autogenerate: { directory: 'reference' },
         },
       ],
+      components: {
+        Footer: './src/components/Footer.astro',
+        Head: './src/components/Head.astro',
+        SocialIcons: './src/components/SocialIcons.astro',
+      },
       head: [
         {
-          tag: 'meta',
+          tag: 'link',
           attrs: {
-            name: 'twitter:creator',
-            content: '@fold_left',
+            rel: 'apple-touch-icon',
+            href: '/apple-touch-icon-180x180.png',
           },
         },
         {
-          tag: 'meta',
+          tag: 'script',
           attrs: {
-            name: 'twitter:site',
-            content: '@fold_left',
+            async: true,
+            src: 'https://www.googletagmanager.com/gtag/js?id=G-DXPH5LLJ0N',
           },
+        },
+        {
+          tag: 'script',
+          content: [
+            'window.dataLayer=window.dataLayer||[];',
+            'function gtag(){dataLayer.push(arguments);}',
+            `gtag('js', new Date());`,
+            `gtag('config', 'G-DXPH5LLJ0N');`,
+          ].join(''),
         },
       ],
     }),

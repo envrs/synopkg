@@ -1,22 +1,38 @@
 ---
 title: sortExports
+description: Configure sorting order for the exports field in package.json files
 ---
 
 When using the `format` command, enables sorting the `exports` property of `package.json` files.
 
-By default, Synopkg will order properties according to the Node.js documentation for [conditional exports](https://nodejs.org/api/packages.html#conditional-exports).
+By default, Synopkg will order properties according to the Node.js documentation for [conditional exports](HREF_CONDITIONAL_EXPORTS).
 
 ## Default Value
 
-```json title=".synopkgrc"
+```json title=".synopkgrc.json"
 {
-  "sortExports": ["types", "node-addons", "node", "browser", "import", "require", "development", "production", "default"]
+  "sortExports": [
+    "types",
+    "node-addons",
+    "node",
+    "browser",
+    "module",
+    "import",
+    "require",
+    "svelte",
+    "development",
+    "production",
+    "script",
+    "default"
+  ]
 }
 ```
 
+## Disable
+
 Set to an empty array to disable.
 
-```json title=".synopkgrc"
+```json title=".synopkgrc.json"
 {
   "sortExports": []
 }

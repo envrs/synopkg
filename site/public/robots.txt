@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://envrs.github.io/synopkg/sitemap-index.xml

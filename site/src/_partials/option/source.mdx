@@ -1,0 +1,16 @@
+import { Code } from "astro:components";
+import HowPackagesAreResolved from "@partials/how-packages-are-resolved.mdx";
+
+Only run <code>{`synopkg ${props.command}`}</code> on package.json files matching the provided pattern(s).
+
+<HowPackagesAreResolved />
+
+<Code
+code={`# only the root package
+synopkg ${props.command} --source 'package.json'
+# only packages matching a glob
+synopkg ${props.command} --source 'packages/beta-\*'
+# multiple values can be provided
+synopkg ${props.command} --source 'package.json' --source 'packages/beta-\*'`}
+lang="bash"
+/>

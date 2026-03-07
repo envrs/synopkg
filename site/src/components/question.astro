@@ -1,0 +1,17 @@
+---
+const { slug, title } = Astro.props;
+---
+
+<article
+  itemscope
+  itemprop="mainEntity"
+  itemtype="https://schema.org/Question"
+  aria-labelledby={slug}
+>
+  <h2 id={slug} itemprop="name">{title}</h2>
+  <div itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer">
+    <div itemprop="text">
+      <slot />
+    </div>
+  </div>
+</article>

@@ -1,0 +1,29 @@
+name: Benchmark v14
+
+on:
+  pull_request:
+    branches:
+      - dev
+  push:
+    branches:
+      - dev
+
+jobs:
+  benchmark:
+    name: Benchmark
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Set up cargo cache
+        uses: Swatinem/rust-cache@v2
+      - name: Install just
+        uses: extractions/setup-just@v1
+        with:
+          just-version: 1.35.0
+      - name: Install hyperfine
+        run: cargo install hyperfine
+      - name: Run Hyperfine
+        run: just benchmark

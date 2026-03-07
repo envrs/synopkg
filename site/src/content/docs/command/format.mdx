@@ -1,33 +1,66 @@
 ---
 title: format
+description: Format and sort package.json files consistently across your monorepo
 ---
 
-import ConfigOption from '@site/partials/option/_config.mdx';
-import HelpOption from '@site/partials/option/_help.mdx';
-import IndentOption from '@site/partials/option/_indent.mdx';
-import SourceOption from '@site/partials/option/_source.mdx';
-import LogLevelOption from '@site/partials/option/_log-level.mdx';
+import { Badge } from "@astrojs/starlight/components";
+import CheckOption from "@partials/option/check.mdx";
+import ConfigOption from "@partials/option/config.mdx";
+import DryRunOption from "@partials/option/dry-run.mdx";
+import HelpOption from "@partials/option/help.mdx";
+import LogLevelsOption from "@partials/option/log-levels.mdx";
+import NoAnsiOption from "@partials/option/no-ansi.mdx";
+import QuoteFilters from "@partials/tips/quote-filters.mdx";
+import SourceOption from "@partials/option/source.mdx";
 
-Organise package.json files according to a conventional format, where fields appear in a predictable order and nested fields are ordered alphabetically. Shorthand properties are used where available, such as the `"repository"` and `"bugs"` fields.
+Format package.json files in your monorepo. Sorts fields into consistent order and alphabetises nested fields. Use this to maintain readable, diff-friendly package.json files. Does not change version numbers—use `fix` for that.
 
-## CLI Options
+## Examples
 
-### source
+```bash
+# Fix every formatting issue in the monorepo
+synopkg format
+# List all formatting issues in the monorepo
+synopkg format --check
+# Check the formatting of one package
+synopkg format --check --source 'packages/pingu/package.json'
+# See more examples
+synopkg format --help
+# See a short summary of options
+synopkg format -h
+```
 
-<SourceOption command="format" />
+## Options
 
-### config
+<QuoteFilters />
+
+### --check
+
+<CheckOption
+  command="format"
+  summary="Lint formatting instead of fixing it and exit with a status code of 1 if issues are found."
+/>
+
+### --config <Badge text="<file-path>" />
 
 <ConfigOption command="format" />
 
-### indent
+### --dry-run
 
-<IndentOption command="format" />
+<DryRunOption command="format" />
 
-### help
+### --log-levels <Badge text="<comma-separated-log-level-names>" />
+
+<LogLevelsOption command="format" />
+
+### --no-ansi
+
+<NoAnsiOption command="format" />
+
+### --source <Badge text="<file-pattern>" />
+
+<SourceOption command="format" />
+
+### --help
 
 <HelpOption command="format" />
-
-## Troubleshooting
-
-<LogLevelOption command="format" />

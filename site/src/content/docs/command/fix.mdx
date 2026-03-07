@@ -1,0 +1,88 @@
+---
+title: fix
+description: Autofix dependency version mismatches across your monorepo to match configured rules
+---
+
+import { Badge } from "@astrojs/starlight/components";
+import ConfigOption from "@partials/option/config.mdx";
+import DependenciesOption from "@partials/option/dependencies.mdx";
+import DependencyTypesOption from "@partials/option/dependency-types.mdx";
+import DryRunOption from "@partials/option/dry-run.mdx";
+import HelpOption from "@partials/option/help.mdx";
+import LogLevelsOption from "@partials/option/log-levels.mdx";
+import NoAnsiOption from "@partials/option/no-ansi.mdx";
+import ShowOption from "@partials/option/show-versions.mdx";
+import SortOption from "@partials/option/sort.mdx";
+import SourceOption from "@partials/option/source.mdx";
+import SpecifierTypesOption from "@partials/option/specifier-types.mdx";
+
+import QuoteFilters from "@partials/tips/quote-filters.mdx";
+
+Fix version mismatches in your monorepo. When the same dependency has different versions across packages, `fix` updates them to match your configuration rules. Use this to resolve issues reported by `lint`. Does not fix formatting—use `format` for that.
+
+## Examples
+
+```bash
+# Preview changes without modifying files
+synopkg fix --dry-run
+# Fix only dependencies and devDependencies (exclude peer, optional)
+synopkg fix --dependency-types prod,dev
+# Fix inconsistencies with exact versions only (eg "1.2.3", not "^1.2.3")
+synopkg fix --specifier-types exact
+# Fix issues in "react" across all packages
+synopkg fix --dependencies react
+# Fix scoped packages like @types/* but exclude others
+synopkg fix --dependencies '@types/**'
+# See more examples
+synopkg fix --help
+# See a short summary of options
+synopkg fix -h
+```
+
+## Options
+
+<QuoteFilters />
+
+### --config <Badge text="<file-path>" />
+
+<ConfigOption command="fix" />
+
+### --dependencies <Badge text="<dependency-name-pattern>" />
+
+<DependenciesOption command="fix" />
+
+### --dependency-types <Badge text="<comma-separated-dependency-type-names>" />
+
+<DependencyTypesOption command="fix" />
+
+### --dry-run
+
+<DryRunOption command="fix" />
+
+### --log-levels <Badge text="<comma-separated-log-level-names>" />
+
+<LogLevelsOption command="fix" />
+
+### --no-ansi
+
+<NoAnsiOption command="fix" />
+
+### --show <Badge text="<comma-separated-detail-names>" />
+
+<ShowOption command="fix" />
+
+### --sort <Badge text="<choice>" />
+
+<SortOption command="fix" />
+
+### --source <Badge text="<file-pattern>" />
+
+<SourceOption command="fix" />
+
+### --specifier-types <Badge text="<comma-separated-specifier-type-names>" />
+
+<SpecifierTypesOption command="fix" />
+
+### --help
+
+<HelpOption command="fix" />

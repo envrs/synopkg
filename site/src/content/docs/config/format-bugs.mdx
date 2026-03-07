@@ -1,19 +1,18 @@
 ---
 title: formatBugs
+description: Configure how the bugs field is formatted in package.json files
 ---
+
+import ConfigOnly from "@partials/tips/config-only.mdx";
 
 When using the `format` command, enables formatting of the `bugs` field of `package.json` into a shorthand format.
 
 ## Default value
 
-```json title=".synopkgrc"
+```json title=".synopkgrc.json"
 {
-  "formatBugs": true
+  "formatBugs": false
 }
 ```
 
-:::note
-
-There is no equivalent CLI Option for this configuration.
-
-:::
+<ConfigOnly />

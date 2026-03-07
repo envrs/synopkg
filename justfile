@@ -1,0 +1,417 @@
+set dotenv-required := true
+set dotenv-filename := ".env"
+
+no_pattern := ""
+
+# List all available commands
+default:
+    just --list
+
+# ==============================================================================
+# Onboarding
+# ==============================================================================
+
+# Install other dependencies used during development
+install-system-dependencies:
+    # https://lib.rs/crates/cargo-llvm-cov
+    cargo +stable install cargo-llvm-cov
+    # https://github.com/killercup/cargo-edit
+    cargo +stable install cargo-edit
+    # https://github.com/bnjbvr/cargo-machete
+    cargo +stable install cargo-machete
+    # https://github.com/sharkdp/hyperfine
+    cargo +stable install hyperfine
+    # https://github.com/flamegraph-rs/flamegraph
+    cargo +stable install flamegraph
+
+# ==============================================================================
+# Write
+# ==============================================================================
+
+# Fix formatting, indentation etc of all files
+format:
+    cargo +nightly fmt --all -- --verbose
+    cargo clippy --fix --allow-dirty
+    npm exec biome -- format --write .
+
+# Update dependencies in Cargo.toml and Cargo.lock
+update-dependencies:
+    cargo upgrade
+    cargo update
+
+# ==============================================================================
+# Lint
+# ==============================================================================
+
+# Run all linting checks
+lint:
+    just check-cargo
+    just check-formatting
+    just check-clippy
+    just check-for-updates
+
+# Run cargo check
+check-cargo:
+    cargo check --locked
+
+# Check for formatting issues
+check-formatting:
+    cargo fmt --all -- --check --verbose
+
+# Check for clippy warnings
+check-clippy:
+    cargo clippy --tests --verbose -- -D warnings
+
+# Look for outdated dependencies
+check-for-updates:
+    cargo upgrade --dry-run
+
+# Look for unused dependencies
+check-unused-dependencies:
+    cargo machete
+
+# ==============================================================================
+# GitHub Actions
+# ==============================================================================
+
+# Run the release github action locally
+run-release-action:
+    act --workflows .github/workflows/release.yml workflow_dispatch
+
+# Run the CI github action locally
+run-ci-action:
+    act --workflows .github/workflows/ci.yml pull_request
+
+# ==============================================================================
+# Benchmark & Profile
+# ==============================================================================
+
+# Build release version with debug symbols for profiling
+build-profile-release:
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+    CARGO_PROFILE_RELEASE_DEBUG=true \
+    CARGO_PROFILE_RELEASE_LTO=true \
+    CARGO_PROFILE_RELEASE_OPT_LEVEL=3 \
+    CARGO_PROFILE_RELEASE_PANIC=abort \
+    CARGO_PROFILE_RELEASE_STRIP=false \
+    cargo build --release
+
+# Benchmark the current release build with hyperfine
+benchmark:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cargo build --release
+    cd fixtures/fluid-framework
+    hyperfine --warmup 2 --runs 4 --ignore-failure "../../target/release/synopkg list"
+
+benchmark-compare:
+    #!/usr/bin/env bash
+
+    # build the previous release version with debug symbols for profiling
+    git checkout main
+    rm -rf target
+    cargo build
+    mkdir -p target/main
+    cp target/debug/synopkg target/main/synopkg
+    rm -rf target/debug
+    # build the current version
+    git checkout -
+    cargo build
+    # compare the two versions
+    cd fixtures/fluid-framework
+    hyperfine \
+        --warmup 4 \
+        --runs 10 \
+        --ignore-failure \
+        --export-markdown ../../target/benchmark-results.md \
+        --command-name "main" "../../target/main/synopkg list" \
+        --command-name "current" "../../target/debug/synopkg list"
+    echo ""
+    echo "Results saved to benchmark-results.md"
+    prettier --write target/benchmark-results.md
+    cat ../../target/benchmark-results.md
+
+flamegraph:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd fixtures/fluid-framework
+    cargo flamegraph --dev --palette rust --output ../../target/flamegraph-$(git rev-parse --abbrev-ref HEAD).svg -- list
+
+# ==============================================================================
+# Test
+# ==============================================================================
+
+# Run all tests and generate a coverage report
+coverage:
+    rm -rf target/llvm-cov/html
+    cargo llvm-cov test --html --ignore-run-fail --ignore-filename-regex '(_test.rs|\/test\/)'
+
+# Open coverage report (on http server to allow Dark Reader Browser Extension)
+serve-coverage:
+    npx http-server -so --port 7357 target/llvm-cov/html
+
+# Run all tests
+test:
+    cargo test -- --nocapture --color=always
+
+test-glob-matching:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build
+    PROJECT_ROOT=$(pwd)
+
+    echo "--- issue-311: packages outside workspace globs excluded ---"
+    cd "$PROJECT_ROOT/fixtures/issue-311" && pnpm install
+    if ../../target/debug/synopkg json | jq '.package' | grep -q "do-not-include"; then
+        echo "FAIL: 'do-not-include' found in output"
+        exit 1
+    else
+        echo "PASS: 'do-not-include' not found in output"
+    fi
+
+    echo "--- issue-319: negative globs exclude packages ---"
+    cd "$PROJECT_ROOT/fixtures/issue-319"
+    if (../../target/debug/synopkg json || true) | jq '.package' | grep -q "test2"; then
+        echo "FAIL: 'test2' found in output (negative glob ignored)"
+        exit 1
+    else
+        echo "PASS: 'test2' correctly excluded by negative glob"
+    fi
+
+# Run test in watch mode
+watch pattern=no_pattern:
+    tput rmam && cargo watch --clear --exec 'test -- --nocapture --color=always {{ pattern }}'
+
+# Run test in watch mode with coverage
+watch-coverage:
+    tput rmam && cargo watch --clear --exec 'llvm-cov test --html --ignore-filename-regex "(_test.rs|\/test\/)" -- --nocapture --color=always'
+
+# Run the rust binary against an unformatted test fixture
+run-misc:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd fixtures/misc
+    RUST_BACKTRACE=1 cargo run -- lint --source 'package.json'
+
+# Run the dev rust binary against a clone of microsoft/FluidFramework
+run-fluid-lint:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd fixtures/fluid-framework
+    RUST_BACKTRACE=1 cargo run -- lint --show all
+
+# Run the dev rust binary against a clone of microsoft/FluidFramework
+run-fluid-list:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd fixtures/fluid-framework
+    RUST_BACKTRACE=1 cargo run -- list
+
+run-fluid-json:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd fixtures/fluid-framework
+    RUST_BACKTRACE=1 cargo run -- json
+
+# Run the dev rust binary against a clone of microsoft/FluidFramework
+run-fluid-fix:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd fixtures/fluid-framework
+    RUST_BACKTRACE=1 cargo run -- fix --dry-run --show all
+
+# Run the dev rust binary against a clone of microsoft/FluidFramework
+run-fluid-update-check:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd fixtures/fluid-framework
+    RUST_BACKTRACE=1 cargo run -- update --check
+
+# Run the dev rust binary against a clone of microsoft/FluidFramework
+run-fluid-update-fix:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd fixtures/fluid-framework
+    RUST_BACKTRACE=1 cargo run -- update --dry-run
+
+# Run the release rust binary against a clone of microsoft/FluidFramework
+run-fluid-prod:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd fixtures/fluid-framework
+    ../../target/release/synopkg lint
+
+# Watch lint output during dev
+watch-fluid:
+    #!/usr/bin/env bash
+    tput rmam && cargo watch --clear --shell 'cd fixtures/fluid-framework && RUST_BACKTRACE=1 cargo run -- lint'
+
+# ==============================================================================
+# Build
+# ==============================================================================
+
+# Build the npm package and rust binary package for mac
+build-local:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    rm -rf npm/packages
+    cargo build --release --locked --target x86_64-apple-darwin
+    just --dotenv-filename .env.darwin-x64 create-npm-binary-package
+    just --dotenv-filename .env.darwin-x64 create-npm-root-package
+    just patch-local
+    cd npm/packages/synopkg
+    npm install
+
+# Modify the local package.json file to only have a mac optionalDependency
+patch-local:
+    #!/usr/bin/env node
+    const fs = require("fs");
+    const path = require("path");
+    const srcPath = path.resolve("npm/packages/synopkg/package.json");
+    const pkg = require(srcPath);
+    const nextPkg = {
+        ...pkg,
+        optionalDependencies: {
+            "synopkg-darwin-x64": "file:../synopkg-darwin-x64"
+        }
+    };
+    const json = JSON.stringify(nextPkg, null, 2);
+    console.log(json);
+    fs.writeFileSync(srcPath, json);
+
+# Build a rust binary and corresponding npm package for a specific target
+build-binary-package:
+    just create-rust-binary
+    just create-npm-binary-package
+
+# Build a rust binary for a specific target
+create-rust-binary:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cargo build --release --locked --target "$TARGET"
+
+# Once a rust binary for a specific target has been built, create an npm package for it
+create-npm-binary-package:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    rm -rf "$NODE_PKG_DIR_PATH"
+    mkdir -p "$NODE_PKG_DIR_PATH/bin"
+    cp "$RUST_BINARY_PATH" "$NODE_PKG_RUST_BINARY_PATH"
+    cp README.md "$NODE_PKG_DIR_PATH/README.md"
+    just create-npm-binary-package-json
+
+# Create the package.json file for an npm package for a specific target
+create-npm-binary-package-json:
+    #!/usr/bin/env node
+    const fs = require("fs");
+    const path = require("path");
+    const srcPath = path.resolve("package.json");
+    const destPath = path.resolve(process.env.NODE_PKG_DIR_PATH, "package.json");
+    const pkg = require(srcPath);
+    const nextPkg = {
+        ...pkg,
+        bin: undefined,
+        contributors: undefined,
+        dependencies: undefined,
+        devDependencies: undefined,
+        engines: undefined,
+        keywords: undefined,
+        optionalDependencies: undefined,
+        name: process.env.NODE_PKG_NAME,
+        description: `Rust Binary for ${process.env.NODE_OS} ${process.env.NODE_ARCH}`,
+        os: [process.env.NODE_OS],
+        cpu: [process.env.NODE_ARCH],
+    };
+    const json = JSON.stringify(nextPkg, null, 2);
+    console.log(json);
+    fs.writeFileSync(destPath, json);
+
+# Create the parent npm package which delegates to each target-specific package
+create-npm-root-package:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    rm -rf "$NODE_ROOT_PKG_DIR_PATH"
+    mkdir -p "$NODE_ROOT_PKG_DIR_PATH"
+    cp README.md "$NODE_ROOT_PKG_DIR_PATH/README.md"
+    cp npm/index.cjs "$NODE_ROOT_PKG_DIR_PATH/index.cjs"
+    just build-npm-types
+    just create-npm-root-package-json
+
+# Generate TypeScript and JSON schema types
+build-npm-types:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    npm exec tsc -- --declaration --emitDeclarationOnly --outDir "$NODE_ROOT_PKG_DIR_PATH" npm/synopkg.ts
+    npm exec ts-json-schema-generator -- --path 'npm/synopkg.ts' --type 'RcFile' --jsDoc extended --validation-keywords see --out "$NODE_ROOT_PKG_DIR_PATH/schema.json"
+
+# Create the package.json file for the parent npm package
+create-npm-root-package-json:
+    #!/usr/bin/env node
+    const fs = require("fs");
+    const path = require("path");
+    const srcPath = path.resolve("package.json");
+    const destPath = path.resolve(process.env.NODE_ROOT_PKG_DIR_PATH, "package.json");
+    const pkg = require(srcPath);
+    const nextPkg = {
+        ...pkg,
+        devDependencies: undefined,
+        bin: {
+          synopkg: "./index.cjs",
+        },
+        optionalDependencies: {
+          "synopkg-linux-x64": pkg.version,
+          "synopkg-linux-x64-musl": pkg.version,
+          "synopkg-linux-arm64": pkg.version,
+          "synopkg-linux-arm64-musl": pkg.version,
+          "synopkg-darwin-x64": pkg.version,
+          "synopkg-darwin-arm64": pkg.version,
+          "synopkg-windows-x64": pkg.version,
+          "synopkg-windows-arm64": pkg.version,
+        },
+        types: './synopkg.d.ts',
+    };
+    const json = JSON.stringify(nextPkg, null, 2);
+    console.log(json);
+    fs.writeFileSync(destPath, json);
+
+# ==============================================================================
+# Publish
+# ==============================================================================
+
+# Create tagged, versioned commit
+create-release-commit:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    npm exec release-it
+
+# Publish the npm package for a specific target
+publish-npm-binary-package:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd "$NODE_PKG_DIR_PATH"
+    npm publish --access public
+
+# Publish the parent npm package
+publish-npm-root-package:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd "$NODE_ROOT_PKG_DIR_PATH"
+    npm publish --access public

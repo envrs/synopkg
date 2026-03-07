@@ -1,0 +1,5 @@
+import { Code } from "astro:components";
+
+<p>{props.summary}</p>
+
+<Code code={`synopkg ${props.command} --check`} lang="bash" />

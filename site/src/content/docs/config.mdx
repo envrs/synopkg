@@ -1,0 +1,24 @@
+---
+title: Configuration File
+description: Configure synopkg behavior through .synopkgrc files and command-line options
+---
+
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+import { getCollection } from "astro:content";
+
+export const allDocs = await getCollection("docs");
+export const pages = allDocs
+  .filter((doc) => doc.id.startsWith("config/") && doc.id !== "config")
+  .sort((a, b) => a.data.title.localeCompare(b.data.title));
+
+Configure synopkg's behavior using a `.synopkgrc` file in your project root. These options control formatting, sorting, dependency management, and version constraints.
+
+<CardGrid>
+  {pages.map((page) => (
+    <LinkCard
+      title={page.data.title}
+      href={`/synopkg/${page.id.replace(/\.mdx?$/, "")}/`}
+      description={page.data.description}
+    />
+  ))}
+</CardGrid>

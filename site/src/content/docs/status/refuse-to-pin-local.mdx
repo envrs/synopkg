@@ -1,0 +1,11 @@
+---
+title: RefuseToPinLocal
+status: suspect
+description: Local workspace package cannot be pinned and must be handled differently
+---
+
+## When this happens
+
+- ✓ Instance is in a [Pinned](VERSION_GROUP_PINNED) version group
+- ✘ [Local Instance](REF_GLOSSARY#local-instance) mismatches its pinned version group
+- ✘ Misconfiguration: Synopkg refuses to change the version specifier of a [Local Instance](REF_GLOSSARY#local-instance)

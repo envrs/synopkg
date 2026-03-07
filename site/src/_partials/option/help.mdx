@@ -1,0 +1,13 @@
+import { Code } from "astro:components";
+
+Display a list of CLI options and other help information.
+
+<Code
+code={`
+# Display a short summary of commands and options
+synopkg ${props.command} -h
+# Display full help with examples
+synopkg ${props.command} --help
+`.trim()}
+lang="bash"
+/>
