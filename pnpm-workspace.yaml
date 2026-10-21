@@ -1,8 +1,15 @@
 packages:
   - site
+  - "!**/fixtures/**"
+  - "!**/npm/**"
+
+allowBuilds:
+  esbuild: true
+  sharp: true
 
 ignoredBuiltDependencies:
   - sharp
 
-onlyBuiltDependencies:
-  - esbuild
+peerDependencyRules:
+  allowedVersions:
+    satori-astro>astro: "7"

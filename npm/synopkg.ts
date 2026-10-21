@@ -15,8 +15,18 @@ export interface RcFile {
   indent?: string;
   /** @see https://envrs.github.io/synopkg/config/max-concurrent-requests */
   maxConcurrentRequests?: number;
+  /**
+   * Skip dependency updates published less than this many minutes ago.
+   * `0` disables the filter. When omitted, the value from the project's
+   * `pnpm-workspace.yaml` is used; if neither is set, defaults to `1440`
+   * (one day). Setting it here always overrides the pnpm value.
+   * @see https://pnpm.io/settings#minimumreleaseage
+   */
+  minimumReleaseAge?: number;
   /** @see https://envrs.github.io/synopkg/semver-groups */
   semverGroups?: SemverGroup.Any[];
+  /** @see https://envrs.github.io/synopkg/update-groups */
+  updateGroups?: UpdateGroup.Any[];
   /** @see https://envrs.github.io/synopkg/config/sort-az */
   sortAz?: string[];
   /** @see https://envrs.github.io/synopkg/config/sort-exports */
@@ -27,6 +37,8 @@ export interface RcFile {
   sortPackages?: boolean;
   /** @see https://envrs.github.io/synopkg/config/source */
   source?: string[];
+  /** @see https://envrs.github.io/synopkg/config/source-mode */
+  sourceMode?: 'replace' | 'extend';
   /** @see https://envrs.github.io/synopkg/config/strict */
   strict?: boolean;
   /** @see https://envrs.github.io/synopkg/version-groups */
@@ -84,36 +96,106 @@ namespace SemverGroup {
   export type Any = Ignored | WithRange;
 }
 
+namespace UpdateGroup {
+  export interface Ignored extends GroupSelector {
+    /** @see https://envrs.github.io/synopkg/update-groups/ignored/#isignored */
+    isIgnored: true;
+  }
+  export interface Targeted extends GroupSelector {
+    /** @see https://envrs.github.io/synopkg/update-groups/targeted/#target */
+    target: 'patch' | 'minor' | 'latest';
+  }
+  export type Any = Ignored | Targeted;
+}
+
 namespace VersionGroup {
   export interface Banned extends GroupSelector {
     /** @see https://envrs.github.io/synopkg/version-groups/banned/#isbanned */
     isBanned: true;
+    /** @see https://envrs.github.io/synopkg/version-groups/banned/#severity */
+    severity?: { IsBanned?: Severity };
   }
   export interface Ignored extends GroupSelector {
     /** @see https://envrs.github.io/synopkg/version-groups/ignored/#isignored */
     isIgnored: true;
+    // `severity` on an Ignored group is accepted and silently discarded —
+    // the group emits no statuses to tune. Omitted from the type so writing it
+    // surfaces as a compile-time hint that it does nothing.
   }
   export interface Pinned extends GroupSelector {
     /** @see https://envrs.github.io/synopkg/version-groups/pinned/#pinversion */
     pinVersion: string;
+    /** @see https://envrs.github.io/synopkg/version-groups/pinned/#severity */
+    severity?: {
+      DiffersToPin?: Severity;
+      PinOverridesSemverRange?: Severity;
+      PinOverridesSemverRangeMismatch?: Severity;
+      RefuseToPinLocal?: Severity;
+    };
   }
   export interface SnappedTo extends GroupSelector {
     /** @see https://envrs.github.io/synopkg/version-groups/snapped-to/#snapto */
     snapTo: string[];
+    /** @see https://envrs.github.io/synopkg/version-groups/snapped-to/#severity */
+    severity?: {
+      DiffersToSnapTarget?: Severity;
+      SemverRangeMismatch?: Severity;
+      RefuseToSnapLocal?: Severity;
+    };
   }
   export interface SameRange extends GroupSelector {
     /** @see https://envrs.github.io/synopkg/version-groups/same-range/#policy */
     policy: 'sameRange';
+    /** @see https://envrs.github.io/synopkg/version-groups/same-range/#severity */
+    severity?: { SemverRangeMismatch?: Severity };
+  }
+  export interface SemverRangeOnly extends GroupSelector {
+    /** @see https://envrs.github.io/synopkg/version-groups/range-only/#policy */
+    policy: 'semverRangeOnly';
+    /** @see https://envrs.github.io/synopkg/version-groups/range-only/#severity */
+    severity?: { SemverRangeMismatch?: Severity };
   }
   export interface SameMinor extends GroupSelector {
     /** @see https://envrs.github.io/synopkg/version-groups/same-minor/#policy */
     policy: 'sameMinor';
+    /** @see https://envrs.github.io/synopkg/version-groups/same-minor/#severity */
+    severity?: {
+      DiffersToHighestOrLowestSemverMinor?: Severity;
+      SemverRangeMismatch?: Severity;
+      SameMinorOverridesSemverRange?: Severity;
+      SameMinorOverridesSemverRangeMismatch?: Severity;
+    };
   }
   export interface Standard extends GroupSelector {
     /** @see https://envrs.github.io/synopkg/version-groups/lowest-semver/#preferversion */
     preferVersion?: 'highestSemver' | 'lowestSemver';
+    /** @see https://envrs.github.io/synopkg/version-groups/highest-semver/#severity */
+    severity?: {
+      SemverRangeMismatch?: Severity;
+      DiffersToLocal?: Severity;
+      DiffersToCatalog?: Severity;
+      DiffersToHighestOrLowestSemver?: Severity;
+    };
   }
-  export type Any = Banned | Ignored | Pinned | SameRange | SameMinor | SnappedTo | Standard;
+  export interface Catalog extends GroupSelector {
+    /** @see https://envrs.github.io/synopkg/version-groups/catalog/#policy */
+    policy: 'catalog';
+    /** @see https://envrs.github.io/synopkg/version-groups/catalog/#severity */
+    severity?: {
+      NotUsingCatalog?: Severity;
+      MissingFromCatalog?: Severity;
+    };
+  }
+  export type Any =
+    | Banned
+    | Catalog
+    | Ignored
+    | Pinned
+    | SameRange
+    | SameMinor
+    | SemverRangeOnly
+    | SnappedTo
+    | Standard;
 }
 
 namespace CustomType {
@@ -148,6 +230,13 @@ namespace CustomType {
 
 type SemverRange = '' | '*' | '>' | '>=' | '.x' | '<' | '<=' | '^' | '~';
 
+/** @see https://envrs.github.io/synopkg/severity/ */
+export type Severity = 'fix' | 'warn' | 'error';
+
+/** Severity values that appear in JSON output. `'none'` is emitted for Valid
+ * instances in `synopkg json` and is not writable in rcfile severity maps. */
+export type JsonSeverity = Severity | 'none';
+
 type DependencyType = 'dev' | 'local' | 'overrides' | 'peer' | 'pnpmOverrides' | 'prod' | 'resolutions' | AnyString;
 
 type SpecifierType =
@@ -171,17 +260,20 @@ type SpecifierType =
 
 type AnyString = string & {};
 
-/** Each Instance printed by `synopkg json` */
+/** Each Instance printed by `synopkg json` and `synopkg fix --reporter json` */
 export type JsonOutput = {
   dependency: string;
   dependencyGroup: string;
   dependencyType: DependencyType;
   package: string;
-  property: ['dependencies'];
+  property: string[];
   strategy: CustomType.Any['strategy'];
   versionGroup: VersionGroupVariant;
   preferredSemverRange: SemverRange | null;
   statusCode: StatusCode;
+  statusType: StatusType;
+  /** @see https://envrs.github.io/synopkg/config/severity/ */
+  severity: JsonSeverity;
   actual: {
     raw: string;
     type: SpecifierType;
@@ -192,14 +284,33 @@ export type JsonOutput = {
   } | null;
 };
 
+export type StatusType = 'Valid' | 'Fixable' | 'Unfixable' | 'Suspect' | 'Conflict';
+
+/** Each formatting mismatch printed by `synopkg format --reporter json` */
+export type FormatJsonOutput = {
+  package: string;
+  filePath: string;
+  property: string[];
+  statusCode: FormatStatusCode;
+};
+
+export type FormatStatusCode =
+  | 'BugsPropertyIsNotFormatted'
+  | 'RepositoryPropertyIsNotFormatted'
+  | 'PropertyIsNotSortedAz'
+  | 'PackagePropertiesAreNotSorted'
+  | 'ExportsPropertyIsNotSorted';
+
 export type VersionGroupVariant =
   | 'Banned'
+  | 'Catalog'
   | 'HighestSemver'
   | 'Ignored'
   | 'LowestSemver'
   | 'Pinned'
   | 'SameRange'
   | 'SameMinor'
+  | 'SemverRangeOnly'
   | 'SnappedTo';
 
 export type StatusCode =
@@ -214,13 +325,18 @@ export type StatusCode =
   | 'SatisfiesLocal'
   | 'SatisfiesSameRangeGroup'
   | 'SatisfiesSameMinorGroup'
+  | 'MatchesSemverGroup'
   | 'SatisfiesSnapTarget'
+  | 'DiffersToCatalog'
   | 'DiffersToHighestOrLowestSemver'
+  | 'DiffersToHighestOrLowestSemverMinor'
   | 'DiffersToLocal'
   | 'DiffersToNpmRegistry'
   | 'DiffersToPin'
   | 'DiffersToSnapTarget'
   | 'IsBanned'
+  | 'MissingFromCatalog'
+  | 'NotUsingCatalog'
   | 'PinOverridesSemverRange'
   | 'PinOverridesSemverRangeMismatch'
   | 'SameMinorOverridesSemverRange'

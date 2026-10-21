@@ -6,7 +6,8 @@ const { dirname, join } = require('node:path');
 const args = process.argv.slice(2);
 const arch = process.arch;
 const [os, extension] = ['win32', 'cygwin'].includes(process.platform) ? ['windows', '.exe'] : [process.platform, ''];
-const optionalDep = `synopkg-${os}-${arch}`;
+const libc = isMusl() ? '-musl' : '';
+const optionalDep = `synopkg-${os}-${arch}${libc}`;
 const binaryName = `synopkg${extension}`;
 
 const pathToBinary = resolveBinaryPath();
@@ -14,10 +15,20 @@ const pathToBinary = resolveBinaryPath();
 process.exit(
   spawnSync(pathToBinary, args, {
     cwd: process.cwd(),
-    stdio: ['ignore', 'inherit', 'inherit'],
+    stdio: 'inherit',
     env: process.env,
   }).status || 0,
 );
+
+function isMusl() {
+  try {
+    if (process.platform !== 'linux') return false;
+    const { sharedObjects } = process.report.getReport();
+    return sharedObjects.some(obj => obj.includes('musl'));
+  } catch (_) {
+    return false;
+  }
+}
 
 function resolveBinaryPath() {
   // Strategy 1: Resolve via package.json for pnpm Plug'n'Play
@@ -33,6 +44,6 @@ function resolveBinaryPath() {
   } catch (_) {}
 
   throw new Error(
-    `Failed to resolve binary for ${os}-${arch}. Please ensure ${optionalDep} is installed as an optional dependency.`,
+    `Failed to resolve binary for ${os}-${arch}${libc}. Please ensure ${optionalDep} is installed as an optional dependency.`,
   );
 }

@@ -1,20 +1,15 @@
 {
   "name": "synopkg",
   "description": "Consistent dependency versions in large JavaScript Monorepos",
-  "version": "14.0.2",
-  "author": "envrs <dev.sulaiman@icloud.com> (https://github.com/synopkg)",
+  "version": "15.0.0",
+  "author": "envrs <dev.sulaiman@icloud.com> (https://github.com/envrs)",
   "bugs": "https://github.com/envrs/synopkg/issues",
-  "contributors": [
-    "NxPKG (https://github.com/nxpkg)",
-    "Md Sulaiman (https://github.com/envrs)",
-    "khulnasoft-bot (https://github.com/khulnasoft-bot)"
-  ],
   "devDependencies": {
-    "@biomejs/biome": "^2.4.4",
-    "@release-it/conventional-changelog": "^10.0.5",
-    "release-it": "^19.2.4",
-    "ts-json-schema-generator": "^2.5.0",
-    "typescript": "^5.9.3"
+    "@biomejs/biome": "^2.5.6",
+    "@release-it/conventional-changelog": "^12.0.0",
+    "release-it": "^21.0.1",
+    "ts-json-schema-generator": "^2.9.0",
+    "typescript": "^6.0.3"
   },
   "engines": {
     "node": ">=14.17.0"
@@ -42,6 +37,7 @@
     "yarn"
   ],
   "license": "MIT",
+  "packageManager": "pnpm@10.33.4",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/envrs/synopkg.git"
