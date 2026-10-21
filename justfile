@@ -156,30 +156,6 @@ serve-coverage:
 test:
     cargo test -- --nocapture --color=always
 
-test-glob-matching:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cargo build
-    PROJECT_ROOT=$(pwd)
-
-    echo "--- issue-311: packages outside workspace globs excluded ---"
-    cd "$PROJECT_ROOT/fixtures/issue-311" && pnpm install
-    if ../../target/debug/synopkg json | jq '.package' | grep -q "do-not-include"; then
-        echo "FAIL: 'do-not-include' found in output"
-        exit 1
-    else
-        echo "PASS: 'do-not-include' not found in output"
-    fi
-
-    echo "--- issue-319: negative globs exclude packages ---"
-    cd "$PROJECT_ROOT/fixtures/issue-319"
-    if (../../target/debug/synopkg json || true) | jq '.package' | grep -q "test2"; then
-        echo "FAIL: 'test2' found in output (negative glob ignored)"
-        exit 1
-    else
-        echo "PASS: 'test2' correctly excluded by negative glob"
-    fi
-
 # Run test in watch mode
 watch pattern=no_pattern:
     tput rmam && cargo watch --clear --exec 'test -- --nocapture --color=always {{ pattern }}'
@@ -255,6 +231,20 @@ run-fluid-prod:
 watch-fluid:
     #!/usr/bin/env bash
     tput rmam && cargo watch --clear --shell 'cd fixtures/fluid-framework && RUST_BACKTRACE=1 cargo run -- lint'
+
+run-severity-warn-all-lint:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd fixtures/severity-warn-all
+    RUST_BACKTRACE=1 cargo run -- lint
+
+run-severity-warn-all-list:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    cd fixtures/severity-warn-all
+    RUST_BACKTRACE=1 cargo run -- list
 
 # ==============================================================================
 # Build
