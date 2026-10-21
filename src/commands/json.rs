@@ -1,48 +1,68 @@
-use {crate::context::Context, serde_json::json};
+use {
+  crate::{
+    context::Context,
+    errors::SynopkgError,
+    instance::{Instance, Severity},
+    source::Source,
+    version_group::InstanceAction,
+  },
+  serde_json::{Value, json},
+};
 
-pub fn run(ctx: Context) -> i32 {
+pub fn instance_to_json(ctx: &Context, instance: &Instance, variant_label: &str) -> Value {
+  let package_path = match &ctx.sources.all[instance.source_idx().0] {
+    Source::Package { file_idx, .. } => ctx.disk.package_json_files[*file_idx].filepath.to_string_lossy().to_string(),
+    Source::PnpmYaml => "pnpm-workspace.yaml".to_string(),
+  };
+  let severity = instance.severity.borrow().unwrap_or(Severity::None);
+  json!({
+    "dependency": instance.descriptor.name,
+    "dependencyGroup": instance.descriptor.internal_name,
+    "dependencyType": instance.descriptor.dependency_type.name,
+    "package": package_path,
+    "property": instance.descriptor.dependency_type.path.split('/').filter(|part| !part.is_empty()).collect::<Vec<&str>>(),
+    "strategy": instance.descriptor.dependency_type.strategy,
+    "versionGroup": variant_label,
+    "preferredSemverRange": instance.preferred_semver_range.as_ref().map(|range| range.unwrap()),
+    "statusCode": instance.state.borrow().get_name(),
+    "statusType": instance.state.borrow().get_status_type(),
+    "severity": severity,
+    "actual": json!({
+      "raw": instance.descriptor.specifier.get_raw(),
+      "type": instance.descriptor.specifier.get_config_identifier(),
+    }),
+    "expected": instance.expected_specifier.borrow().as_ref().map(|expected|
+      json!({
+        "raw": expected.get_raw(),
+        "type": expected.get_config_identifier(),
+      }),
+    ),
+  })
+}
+
+pub fn run(ctx: Context) -> Result<Context, SynopkgError> {
   let mut is_invalid = false;
+  let strict = ctx.config.rcfile.strict;
 
   ctx
     .version_groups
     .iter()
-    .filter(|group| !group.has_ignored_variant() || ctx.config.cli.show_ignored)
+    .filter(|group| !group.is_ignored() || ctx.config.cli.show_ignored)
     .for_each(|group| {
-      group.get_sorted_dependencies(&ctx.config.cli.sort).for_each(|dependency| {
-        dependency.get_sorted_instances().for_each(|instance| {
-          let package = instance.descriptor.package.borrow();
-          let instance_json = json!({
-            "dependency": instance.descriptor.name,
-            "dependencyGroup": instance.descriptor.internal_name,
-            "dependencyType": instance.descriptor.dependency_type.name,
-            "package": package.file_path.to_string_lossy(),
-            "property": instance.descriptor.dependency_type.path.split('/').filter(|part| !part.is_empty()).collect::<Vec<&str>>(),
-            "strategy": instance.descriptor.dependency_type.strategy,
-            "versionGroup": format!("{:?}", dependency.variant),
-            "preferredSemverRange": instance.preferred_semver_range.as_ref().map(|range|range.unwrap()),
-            "statusCode": instance.state.borrow().get_name(),
-            "actual": json!({
-              "raw": instance.descriptor.specifier.get_raw(),
-              "type": instance.descriptor.specifier.get_config_identifier(),
-            }),
-            "expected": instance.expected_specifier.borrow().as_ref().map(|expected|
-              json!({
-                "raw": expected.get_raw(),
-                "type": expected.get_config_identifier(),
-              }),
-            ),
+      let variant_label = group.variant_label();
+      group.get_sorted_dependencies(&ctx.config.cli.sort).for_each(|dep| {
+        dep
+          .get_sorted_instances(&ctx.instances, &ctx.sources.all)
+          .for_each(|(_, instance)| {
+            let action = group.resolve_action(instance, strict);
+            let instance_json = instance_to_json(&ctx, instance, variant_label);
+            println!("{}", serde_json::to_string(&instance_json).unwrap());
+            if matches!(action, InstanceAction::Render(Severity::Error) | InstanceAction::Fix(_)) {
+              is_invalid = true;
+            }
           });
-          println!("{}", serde_json::to_string(&instance_json).unwrap());
-          if instance.is_invalid() || (instance.is_suspect() && ctx.config.rcfile.strict) {
-            is_invalid = true;
-          }
-        });
       });
     });
 
-  if is_invalid {
-    1
-  } else {
-    0
-  }
+  if is_invalid { Err(SynopkgError::IssuesFound) } else { Ok(ctx) }
 }

@@ -1,19 +1,17 @@
 use {
   super::registry_client::MockRegistryClient,
   crate::{
-    catalogs::{Catalog, CatalogsByName},
-    cli::{Cli, SortBy, Subcommand, UpdateTarget},
-    config::Config,
-    context::Context,
-    package_json::PackageJson,
-    packages::Packages,
+    cli::{Cli, ReporterKind, SortBy, Subcommand, UpdateTarget},
+    context::{Config, Context},
+    dependency::DependencyType,
+    disk::{Disk, File, YamlFile, detect_formatting, empty_yaml_file, parse_yaml_file},
     rcfile::Rcfile,
-    registry_client::RegistryClient,
-    specifier::Specifier,
+    registry::{client::RegistryClient, updates::RegistryUpdates},
+    sources::Sources,
   },
   log::LevelFilter,
   serde_json::Value,
-  std::{cell::RefCell, collections::HashMap, env, path::PathBuf, sync::Arc},
+  std::{env, path::PathBuf, sync::Arc},
 };
 
 pub fn cli() -> Cli {
@@ -21,21 +19,22 @@ pub fn cli() -> Cli {
     check: true,
     config_path: None,
     cwd: env::current_dir().unwrap(),
-    dependencies: vec![],
-    dependency_types: vec![],
     disable_ansi: true,
     dry_run: true,
+    filters: None,
     log_levels: vec![LevelFilter::Error],
-    packages: vec![],
+    reporter: ReporterKind::Pretty,
     show_hints: false,
     show_ignored: false,
     show_instances: false,
     show_status_codes: false,
     sort: SortBy::Name,
     source_patterns: vec![],
-    specifier_types: vec![],
+    source_mode: None,
     subcommand: Subcommand::Lint,
     target: UpdateTarget::Latest,
+    interactive: false,
+    no_cache: false,
   }
 }
 
@@ -57,82 +56,89 @@ pub fn config_from_mock(value: serde_json::Value) -> Config {
 
 /// Create an empty Rcfile struct
 pub fn rcfile() -> Rcfile {
-  let empty_json = "{}".to_string();
-  serde_json::from_str::<Rcfile>(&empty_json).unwrap()
+  Rcfile::default()
 }
 
 /// Create an Rcfile struct from a mocked .synopkgrc
 pub fn rcfile_from_mock(value: serde_json::Value) -> Rcfile {
-  serde_json::from_value::<Rcfile>(value).unwrap()
+  serde_json::from_value::<crate::rcfile::RawRcfile>(value)
+    .unwrap()
+    .try_into()
+    .unwrap()
 }
 
-/// Parse a package.json string
-pub fn package_json_from_value(contents: Value) -> PackageJson {
+/// Parse a package.json value into a `File<Value>` with a synthetic file
+/// path derived from the package's name.
+pub fn package_json_file_from_value(contents: Value) -> File<Value> {
   let name = contents
     .pointer("/name")
     .and_then(|name| name.as_str())
     .unwrap_or("NAME_IS_MISSING")
     .to_string();
-
-  // Create a realistic file path based on package name
-  // e.g., "package-a" -> "/packages/package-a/package.json"
   let file_path = PathBuf::from(format!("/packages/{name}/package.json"));
-
-  PackageJson {
-    name,
-    file_path,
-    formatting_mismatches: RefCell::new(vec![]),
-    json: RefCell::new(contents.to_string()),
-    contents: RefCell::new(contents),
+  let raw = serde_json::to_string_pretty(&contents).unwrap_or_default();
+  File {
+    filepath: file_path,
+    formatting: detect_formatting(&raw),
+    contents,
+    dirty: false,
   }
 }
 
-/// Create an collection of package.json files from mocked values
-pub fn packages_from_mocks(values: Vec<serde_json::Value>) -> Packages {
-  let mut packages = Packages::new();
+pub fn package_json_from_value(contents: Value) -> Value {
+  contents
+}
+
+/// Parse raw yaml into a `YamlFile` with a synthetic file path
+/// (`/test/pnpm-workspace.yaml`). Falls back to an empty `YamlFile`
+/// when the input fails to parse.
+pub fn pnpm_yaml_file_from_str(yaml_content: &str) -> YamlFile {
+  parse_yaml_file(yaml_content.to_string(), PathBuf::from("/test/pnpm-workspace.yaml"))
+    .unwrap_or_else(|| empty_yaml_file(PathBuf::from("/test/pnpm-workspace.yaml")))
+}
+
+/// Build a `Sources` arena and a synthetic `Disk` from mocked package.json
+/// values. Every package gets a `Source::Package` entry; no pnpm yaml is
+/// constructed by this helper. All package paths are added to
+/// `user_source_indices` so iteration sees them in pass 2.
+pub fn disk_and_sources_from_mocks(values: Vec<serde_json::Value>) -> (Disk, Sources) {
+  let cwd = PathBuf::from("/test");
+  let mut package_json_files: Vec<File<serde_json::Value>> = Vec::new();
+  let mut all_paths: Vec<PathBuf> = Vec::new();
   for value in values {
-    packages.add_package(package_json_from_value(value));
+    let file = package_json_file_from_value(value);
+    all_paths.push(file.filepath.clone());
+    package_json_files.push(file);
   }
-  packages
+  let disk = Disk {
+    cwd,
+    lerna_json: None,
+    package_json_files,
+    package_json_root_idx: None,
+    package_manager: None,
+    pnpm_workspace: None,
+  };
+  let sources = Sources::from_disk(&disk, &all_paths);
+  (disk, sources)
 }
 
-/// Create a MockRegistryClient from mocked package data
-fn registry_client_from_mocks(mock_updates: serde_json::Value) -> Option<Arc<dyn RegistryClient>> {
-  Some(Arc::new(MockRegistryClient::from_json(mock_updates)))
-}
-
-/// Create a CatalogsByName from mocked catalog data
-///
-/// Examples:
-/// - json!({"default": {"react": "^17.0.2"}}) -> one catalog
-/// - json!({"default": {...}, "react18": {...}}) -> multiple catalogs
-pub fn catalogs_from_mocks(value: serde_json::Value) -> CatalogsByName {
-  let mut catalogs = HashMap::new();
-  if let Some(obj) = value.as_object() {
-    for (catalog_name, catalog_value) in obj {
-      let mut catalog = Catalog::new();
-      if let Some(deps) = catalog_value.as_object() {
-        for (dep_name, version) in deps {
-          if let Some(version_str) = version.as_str() {
-            catalog.insert(dep_name.clone(), Specifier::new(version_str));
-          }
-        }
-      }
-      catalogs.insert(catalog_name.clone(), catalog);
-    }
-  }
-  catalogs
-}
-
-/// Create a Context struct with mocked npm registry updates applied to it
+/// Create a Context and RegistryUpdates from mocked npm registry data
 pub async fn context_with_registry_updates(
   config: Config,
-  packages: Packages,
+  disk: Disk,
+  sources: Sources,
   mock_updates: serde_json::Value,
-  catalogs: Option<CatalogsByName>,
-) -> Context {
-  let registry_client = registry_client_from_mocks(mock_updates);
-  let mut ctx = Context::create(config, packages, registry_client, catalogs);
-  ctx.fetch_all_updates().await;
-  ctx
+  dep_types: Vec<DependencyType>,
+) -> (Context, RegistryUpdates) {
+  let client: Arc<dyn RegistryClient> = Arc::new(MockRegistryClient::from_json(mock_updates));
+  let ctx = Context::create(config, disk, sources, dep_types).unwrap();
+  let updates = RegistryUpdates::fetch(
+    &client,
+    &ctx.version_groups,
+    &ctx.instances,
+    ctx.config.rcfile.max_concurrent_requests,
+    ctx.config.rcfile.minimum_release_age,
+  )
+  .await;
+  (ctx, updates)
 }

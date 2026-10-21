@@ -1,6 +1,8 @@
 ---
 title: customTypes
 description: Define custom package.json properties to manage beyond standard dependency types
+sidebar:
+  badge: Updated
 ---
 
 import { Badge } from "@astrojs/starlight/components";
@@ -38,7 +40,8 @@ This is how the default dependency types are defined:
     },
     "pnpmOverrides": {
       "strategy": "versionsByName",
-      "path": "pnpm.overrides"
+      "path": "overrides",
+      "source": "PnpmWorkspace"
     },
     "prod": {
       "strategy": "versionsByName",
@@ -52,53 +55,177 @@ This is how the default dependency types are defined:
 }
 ```
 
-## \[name\] <Badge text="Required" variant="danger" />
+Pick a strategy below based on the shape of your data.
 
-The key of each custom type is its name, this is equivalent to the default names such as `prod` and `dev` and can be used in all of the same places those can:
+## `name@version`
+
+A single string combining name and version, separated by `@`.
+
+```json title="package.json"
+{
+  "packageManager": "pnpm@7.27.0"
+}
+```
+
+```json title=".synopkgrc.json"
+{
+  "customTypes": {
+    "packageManager": {
+      "strategy": "name@version",
+      "path": "packageManager"
+    }
+  }
+}
+```
+
+### \[name\] <Badge text="Required" variant="danger" />
+
+The name of the new dependency type you are adding to synopkg. Synopkg ships with built-in types like `prod`, `dev`, and `peer`; defining a custom type adds your chosen name to that list, ready to be referenced from:
 
 1. `--dependency-types`
 1. `versionGroup.dependencyTypes`
 1. `semverGroup.dependencyTypes`
 1. `dependencyGroup.dependencyTypes`
 
-## \[name\].path <Badge text="Required" variant="danger" />
+### \[name\].path <Badge text="Required" variant="danger" />
 
-Where the version can be found in each package.json file, such as `engines`, `packageManager` or `some.nested.property`.
+The location in each package.json of the `"name@version"` string. Use dot notation for nested properties (eg. `packageManager`, `some.nested.property`).
 
-## \[name\].strategy <Badge text="Required" variant="danger" />
+### \[name\].strategy <Badge text="Required" variant="danger" />
 
-A strategy defines how synopkg should read and write dependency names and versions.
+Must be `"name@version"`.
 
-There are 3 to choose from:
+## `name~version`
 
-### `name@version`
+The name and version live at two separate paths. Both must point directly to **string** values, not to a containing object.
 
-The name and version are combined in a single string. Commonly seen in package manager specifications.
-
-```json
+```json title="package.json"
 {
-  "packageManager": "pnpm@7.27.0"
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "22.11.0"
+    }
+  }
 }
 ```
 
-### `name~version`
-
-The name and version are in different locations.
-
-```json
+```json title=".synopkgrc.json"
 {
-  "name": "some-local-package",
-  "version": "12.4.2"
+  "customTypes": {
+    "devEnginesRuntime": {
+      "strategy": "name~version",
+      "namePath": "devEngines.runtime.name",
+      "path": "devEngines.runtime.version"
+    }
+  }
 }
 ```
 
-### `versionsByName`
+A common mistake is pointing `path` at the containing object (`devEngines.runtime`) and `namePath` at `name` relative to it. Both paths are absolute from the package.json root and must resolve to strings.
 
-Typical dependency objects where keys are package names and values are version strings.
+### \[name\] <Badge text="Required" variant="danger" />
 
-```json
+The name of the new dependency type you are adding to synopkg. Synopkg ships with built-in types like `prod`, `dev`, and `peer`; defining a custom type adds your chosen name to that list, ready to be referenced from:
+
+1. `--dependency-types`
+1. `versionGroup.dependencyTypes`
+1. `semverGroup.dependencyTypes`
+1. `dependencyGroup.dependencyTypes`
+
+### \[name\].path <Badge text="Required" variant="danger" />
+
+The location in each package.json of the version string. Absolute from the package.json root; must point to a string.
+
+### \[name\].namePath <Badge text="Required" variant="danger" />
+
+The location in each package.json of the dependency name. Absolute from the package.json root; must point to a string.
+
+### \[name\].strategy <Badge text="Required" variant="danger" />
+
+Must be `"name~version"`.
+
+## `version`
+
+A bare version string with no name in the data. The custom type's **key** is used as the dependency name.
+
+```json title="package.json"
 {
-  "pnpm": "10.10.0",
-  "prettier": "3.5.3"
+  "engines": {
+    "node": "22.11.0"
+  }
 }
 ```
+
+```json title=".synopkgrc.json"
+{
+  "customTypes": {
+    "node": {
+      "strategy": "version",
+      "path": "engines.node"
+    }
+  }
+}
+```
+
+Here the dependency is reported as `node` because that is the custom type's key.
+
+### \[name\] <Badge text="Required" variant="danger" />
+
+The name of the new dependency type you are adding to synopkg. Synopkg ships with built-in types like `prod`, `dev`, and `peer`; defining a custom type adds your chosen name to that list, ready to be referenced from:
+
+1. `--dependency-types`
+1. `versionGroup.dependencyTypes`
+1. `semverGroup.dependencyTypes`
+1. `dependencyGroup.dependencyTypes`
+
+For the `version` strategy specifically, this name is also used as the dependency name in reports and grouping (since the data has no name field of its own).
+
+### \[name\].path <Badge text="Required" variant="danger" />
+
+The location in each package.json of the version string. Use dot notation for nested properties (eg. `engines.node`).
+
+### \[name\].strategy <Badge text="Required" variant="danger" />
+
+Must be `"version"`.
+
+## `versionsByName`
+
+A typical dependency object where keys are package names and values are version strings.
+
+```json title="package.json"
+{
+  "dependencies": {
+    "pnpm": "10.10.0",
+    "prettier": "3.5.3"
+  }
+}
+```
+
+```json title=".synopkgrc.json"
+{
+  "customTypes": {
+    "prod": {
+      "strategy": "versionsByName",
+      "path": "dependencies"
+    }
+  }
+}
+```
+
+### \[name\] <Badge text="Required" variant="danger" />
+
+The name of the new dependency type you are adding to synopkg. Synopkg ships with built-in types like `prod`, `dev`, and `peer`; defining a custom type adds your chosen name to that list, ready to be referenced from:
+
+1. `--dependency-types`
+1. `versionGroup.dependencyTypes`
+1. `semverGroup.dependencyTypes`
+1. `dependencyGroup.dependencyTypes`
+
+### \[name\].path <Badge text="Required" variant="danger" />
+
+The location in each package.json of the `{ "name": "version" }` object. Use dot notation for nested properties (eg. `dependencies`, `pnpm.overrides`).
+
+### \[name\].strategy <Badge text="Required" variant="danger" />
+
+Must be `"versionsByName"`.

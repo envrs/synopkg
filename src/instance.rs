@@ -1,34 +1,31 @@
-//! Instance represents a single occurrence of a dependency.
-//!
-//! For example, if package-a has `"react": "18.0.0"` in its dependencies,
-//! that creates one Instance. If package-b also has `"react": "17.0.0"`,
-//! that's a different Instance.
-//!
-//! Key points:
-//! - Instances are wrapped in Rc<Instance> for cheap sharing across version groups
-//! - state field uses RefCell for interior mutability during inspection phase
-//! - States start as Unknown and are assigned in visit_packages()
-//!
-//! See .cursorrules for when to use Rc vs Arc.
-//! See PATTERNS.md "State Machine Pattern" for how states work.
+pub mod instance_state;
+pub mod severity;
+
+pub use {
+  instance_state::{
+    FixableInstance, InstanceState, InvalidInstance, SemverGroupAndVersionConflict, SuspectInstance, UnfixableInstance, ValidInstance,
+  },
+  severity::Severity,
+};
 
 #[cfg(test)]
-#[path = "instance_test.rs"]
+mod instance_state_test;
+#[cfg(test)]
 mod instance_test;
+#[cfg(test)]
+mod source_idx_test;
 
 use {
   crate::{
-    dependency::UpdateUrl,
-    dependency_type::{DependencyType, Strategy},
-    instance_state::{
-      FixableInstance, InstanceState, InvalidInstance, SemverGroupAndVersionConflict, SuspectInstance, UnfixableInstance, ValidInstance,
-    },
-    package_json::PackageJson,
+    dependency::{DependencyType, Strategy, UpdateUrl},
+    disk::Disk,
+    rcfile::update_group::UpdatePolicy,
     semver_range::SemverRange,
+    source::Source,
+    sources::SourceIdx,
     specifier::Specifier,
   },
   log::debug,
-  serde_json::Value,
   std::{
     cell::RefCell,
     path::{Path, PathBuf},
@@ -36,81 +33,86 @@ use {
   },
 };
 
+/// Index into the Context.instances arena.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct InstanceIdx(pub usize);
+
 /// Unique identifier for an instance, format: "{dep} in {location} of
 /// {package}" Examples: "react in /dependencies of package-a"
 ///           "pnpm in /packageManager of package-b"
 pub type InstanceId = String;
 
-/// The unchanging descriptor data for an instance.
-///
-/// Contains the original information about where this instance came from
-/// and what it contains. This data never changes during processing.
+/// The unchanging descriptor data for an instance. Never mutated.
 #[derive(Debug)]
 pub struct InstanceDescriptor {
-  /// The dependency type to use to read/write this instance
-  pub dependency_type: DependencyType,
-  /// When a dependency group is used, its alias_name is used here in place of
-  /// the actual dependency name (eg. "@aws-sdk/**" instead of "@aws-sdk/core"
-  /// and "@aws-sdk/middleware-logger" etc.), otherwise the actual name is used.
-  ///
-  /// This aliased name is only used when allocating an `Instance` to a
-  /// `Dependency`, the original name is otherwise preserved
+  /// Shared via `Rc` across descriptors built from the same dep type within
+  /// one iteration pass.
+  pub dependency_type: Rc<DependencyType>,
+  /// When a dependency group is used, its alias_name (e.g. "@aws-sdk/**")
+  /// goes here in place of the actual dependency name. Only used when
+  /// allocating an `Instance` to a `Dependency`; the original `name` is
+  /// otherwise preserved.
   pub internal_name: String,
-  /// Does this instance match the filter options provided via the CLI?
-  pub matches_cli_filter: bool,
-  /// The dependency name, e.g., "react", "react-dom", "@types/node"
+  /// Whether this dependency's NAME matches a local package name (e.g.
+  /// package "foo" depends on "bar", and "bar" is also a local package).
+  /// Distinct from `Instance::is_local_instance` (which means this instance
+  /// IS a local package's own version declaration).
+  pub is_local_dependency: bool,
   pub name: String,
-  /// The package.json this instance belongs to
-  /// The package.json this instance belongs to.
-  /// Wrapped in Rc<RefCell<T>> for shared ownership with interior mutability.
-  pub package: Rc<RefCell<PackageJson>>,
-  /// The original version specifier, which should never be mutated,
-  /// e.g., "18.0.0", "^18.0.0", "workspace:*", "git://github.com/..."
+  /// Index into `Sources::all` for the file this instance was read from. For
+  /// catalog defs this points at the holding file (pnpm yaml or the Bun root
+  /// pkg.json); for regular declarations it points at the consuming
+  /// package.json.
+  pub source_idx: SourceIdx,
+  /// The original specifier, never mutated.
   pub specifier: Rc<Specifier>,
 }
 
 /// A single occurrence of a dependency in the project.
-///
-/// Created during Phase 1 (Context::create), state is assigned during Phase 2
-/// (visit_packages), and processed during Phase 3 (command execution).
-///
-/// The state field uses RefCell to allow mutation during the inspection phase
-/// without requiring &mut references to the entire Context.
 #[derive(Debug)]
 pub struct Instance {
-  /// The original data this Instance is derived from
   pub descriptor: InstanceDescriptor,
-  /// The version specifier which synopkg has determined this instance should
-  /// be set to, if it was not possible to determine without user intervention,
-  /// this will be a `None`.
+  /// `None` when synopkg cannot determine the expected specifier without
+  /// user intervention.
   pub expected_specifier: RefCell<Option<Rc<Specifier>>>,
-  /// A unique identifier for this instance
   pub id: InstanceId,
-  /// Whether this is a package developed in this repo
-  pub is_local: bool,
-  /// If this instance belongs to a `WithRange` semver group, this is the range.
-  /// This is used by Version Groups while determining the preferred version,
-  /// to try to also satisfy any applicable semver group ranges
+  pub is_local_instance: bool,
+  /// If this instance belongs to a `WithRange` semver group, the range used
+  /// by Version Groups when determining the preferred version, so it tries
+  /// to also satisfy any applicable semver group ranges.
   pub preferred_semver_range: Option<SemverRange>,
-  /// The validation state of this instance.
-  /// Starts as Unknown, assigned during visit_packages().
-  /// RefCell allows interior mutability - states can be assigned without
-  /// requiring mutable access to the entire Context structure.
+  /// If this instance matched an `updateGroups` entry, the policy applied
+  /// when picking eligible registry updates (skip entirely or clamp the
+  /// effective `UpdateTarget`). `None` when no group matched.
+  pub preferred_update_policy: Option<UpdatePolicy>,
+  /// Resolved by `VersionGroup::resolve_action` from the instance's `state`,
+  /// the matching group's `severity` map and the rcfile's `strict` flag. Set
+  /// as a side effect of `resolve_action`; remains `None` until the resolver
+  /// has run. See `.plans/severity.md` §3.5.
+  pub severity: RefCell<Option<Severity>>,
+  /// Starts as `Unknown`, assigned during `visit_packages()`. `RefCell` so
+  /// states can be assigned without `&mut Context`.
   pub state: RefCell<InstanceState>,
 }
 
 impl Instance {
-  pub fn new(descriptor: InstanceDescriptor, preferred_semver_range: Option<SemverRange>) -> Instance {
+  pub fn new(
+    descriptor: InstanceDescriptor,
+    package_name: &str,
+    preferred_semver_range: Option<SemverRange>,
+    preferred_update_policy: Option<UpdatePolicy>,
+  ) -> Instance {
     let dependency_type_name = &descriptor.dependency_type.path;
-    let package_name = descriptor.package.borrow().name.clone();
-    let id = format!("{} in {} of {}", &descriptor.name, dependency_type_name, package_name);
-    let is_local = dependency_type_name == "/version";
+    let id = format!("{} in {} of {}", descriptor.name, dependency_type_name, package_name);
+    let is_local_instance = dependency_type_name == "/version";
     Instance {
       descriptor,
       expected_specifier: RefCell::new(None),
       id,
-      is_local,
+      is_local_instance,
       preferred_semver_range,
+      preferred_update_policy,
+      severity: RefCell::new(None),
       state: RefCell::new(InstanceState::Unknown),
     }
   }
@@ -120,29 +122,33 @@ impl Instance {
   /// Examples:
   /// - "link:../package-a" from /packages/package-b/package.json -> /packages/package-a
   /// - "link:../../elsewhere/package-a" from /packages/package-b/package.json -> /elsewhere/package-a
-  pub fn link_resolves_to_local_package(&self, local_instance: &Instance) -> bool {
+  ///
+  /// pnpm catalog instances do not live in a package.json, so a `Link`
+  /// specifier sourced from one cannot resolve to a local package — this
+  /// returns `false` in that case.
+  pub fn link_resolves_to_local_package(&self, local_instance: &Instance, sources: &[Source], disk: &Disk) -> bool {
     if let Specifier::Link(link) = &*self.descriptor.specifier {
-      // Get the directory of the consuming package
-      let consuming_package_path = &self.descriptor.package.borrow().file_path;
+      let self_idx = self.source_idx();
+      let local_idx = local_instance.source_idx();
+      let Source::Package {
+        file_idx: consuming_idx, ..
+      } = &sources[self_idx.0]
+      else {
+        return false;
+      };
+      let Source::Package { file_idx: local_idx, .. } = &sources[local_idx.0] else {
+        return false;
+      };
+      let consuming_package_path = &disk.package_json_files[*consuming_idx].filepath;
       let consuming_package_dir = consuming_package_path.parent().unwrap_or_else(|| Path::new(""));
-
-      // Extract the path from "link:../path/to/package"
       let link_path = link.raw.strip_prefix("link:").unwrap_or(&link.raw);
-
-      // Resolve the link path relative to the consuming package directory
       let resolved_link_path = consuming_package_dir.join(link_path);
-
-      // Get the local package's directory
-      let local_package_path = &local_instance.descriptor.package.borrow().file_path;
+      let local_package_path = &disk.package_json_files[*local_idx].filepath;
       let local_package_dir = local_package_path.parent().unwrap_or_else(|| Path::new(""));
 
-      // Try to canonicalize both paths if they exist (real filesystem)
-      // Otherwise compare the normalized paths (test environment)
       if let (Ok(resolved_canonical), Ok(local_canonical)) = (resolved_link_path.canonicalize(), local_package_dir.canonicalize()) {
         resolved_canonical == local_canonical
       } else {
-        // For test paths that don't exist on disk, normalize and compare
-        // This normalizes . and .. components without requiring filesystem access
         let normalized_resolved = Self::normalize_path(&resolved_link_path);
         let normalized_local = Self::normalize_path(local_package_dir);
         normalized_resolved == normalized_local
@@ -150,6 +156,43 @@ impl Instance {
     } else {
       false
     }
+  }
+
+  /// Whether this instance was sourced from a catalog (pnpm or Bun) rather
+  /// than a regular package.json dependency. Reads the dep type's
+  /// `is_catalog_definition` flag — set by `make_catalog_dep_types` for
+  /// auto-generated `pnpmCatalog*` / `bunCatalog*` dep types.
+  pub fn is_catalog_instance(&self) -> bool {
+    self.descriptor.dependency_type.is_catalog_definition
+  }
+
+  /// Index into `Sources::all` for the file this instance reads from.
+  pub fn source_idx(&self) -> SourceIdx {
+    self.descriptor.source_idx
+  }
+
+  /// Catalog name (`"default"` or named) for catalog instances; `None` for
+  /// regular non-catalog instances. Derives the name cheaply from the dep
+  /// type's `name` (no allocation).
+  pub fn catalog_name(&self) -> Option<&str> {
+    if self.is_catalog_instance() {
+      Some(crate::sources::parse_catalog_name(&self.descriptor.dependency_type.name))
+    } else {
+      None
+    }
+  }
+
+  /// Build the `catalog:` / `catalog:{name}` target specifier this catalog
+  /// definition represents. Returns `None` for non-catalog instances.
+  pub fn catalog_target_specifier(&self) -> Option<Rc<Specifier>> {
+    self.catalog_name().map(|name| {
+      let raw = if name == "default" {
+        "catalog:".to_string()
+      } else {
+        format!("catalog:{name}")
+      };
+      Specifier::new(&raw)
+    })
   }
 
   /// Normalize a path by resolving . and .. components.
@@ -186,6 +229,14 @@ impl Instance {
   pub fn mark_suspect(&self, state: SuspectInstance) -> &Self {
     let specifier = Rc::clone(&self.descriptor.specifier);
     self.set_state(InstanceState::Suspect(state), &specifier)
+  }
+
+  /// Like `mark_suspect` but records an expected specifier so a user can opt
+  /// into routing the instance through the fix path via `severity: { ...: "fix" }`.
+  /// Used by `RefuseToPinLocal` and `RefuseToSnapLocal` — both rewrite a local
+  /// package's `/version` to a target specifier.
+  pub fn mark_suspect_with_expected(&self, state: SuspectInstance, expected_specifier: &Rc<Specifier>) -> &Self {
+    self.set_state(InstanceState::Suspect(state), expected_specifier)
   }
 
   /// Mark this instance as having a mismatch which can be auto-fixed
@@ -293,7 +344,7 @@ impl Instance {
   }
 
   pub fn get_update_url(&self) -> Option<UpdateUrl> {
-    if self.descriptor.matches_cli_filter && !self.is_local {
+    if !self.is_local_instance {
       let internal_name = &self.descriptor.internal_name;
       let actual_name = &self.descriptor.name;
       let raw = self.descriptor.specifier.get_raw();
@@ -312,7 +363,9 @@ impl Instance {
                 url: format!("https://registry.npmjs.org/{actual_name}"),
               })
             } else {
-              debug!("'{aliased_name}' in '{raw}' does not equal the instance name '{actual_name}', skipping update as this might create mismatches");
+              debug!(
+                "'{aliased_name}' in '{raw}' does not equal the instance name '{actual_name}', skipping update as this might create mismatches"
+              );
               None
             }
           } else {
@@ -341,23 +394,47 @@ impl Instance {
 
   /// Does this instance's specifier match the specifier of every one of the
   /// given instances?
-  pub fn already_satisfies_all(&self, instances: &[Rc<Instance>]) -> bool {
+  pub fn already_satisfies_all(&self, indices: &[InstanceIdx], arena: &[Instance]) -> bool {
     !matches!(&*self.descriptor.specifier, Specifier::None)
-      && self
-        .descriptor
-        .specifier
-        .satisfies_all(&instances.iter().map(|i| Rc::clone(&i.descriptor.specifier)).collect::<Vec<_>>())
+      && self.descriptor.specifier.satisfies_all(
+        &indices
+          .iter()
+          .map(|idx| Rc::clone(&arena[idx.0].descriptor.specifier))
+          .collect::<Vec<_>>(),
+      )
   }
 
-  /// Does this instance have the same major.minor version as all other
-  /// instances? Semver ranges are not taken into account.
-  pub fn already_has_same_minor_number_as_all(&self, instances: &[Rc<Instance>]) -> bool {
+  /// Does this instance have the same major version as all other instances?
+  /// Semver ranges are not taken into account.
+  pub fn already_has_same_major_as_all(&self, indices: &[InstanceIdx], arena: &[Instance]) -> bool {
     if matches!(&*self.descriptor.specifier, Specifier::None) {
       return false;
     }
     match self.descriptor.specifier.get_node_version() {
       None => false,
-      Some(a) => instances.iter().all(|other_instance| {
+      Some(a) => indices.iter().all(|idx| {
+        let other_instance = &arena[idx.0];
+        if matches!(&*other_instance.descriptor.specifier, Specifier::None) {
+          return false;
+        }
+        match other_instance.descriptor.specifier.get_node_version() {
+          None => false,
+          Some(b) => a.major == b.major,
+        }
+      }),
+    }
+  }
+
+  /// Does this instance have the same major.minor version as all other
+  /// instances? Semver ranges are not taken into account.
+  pub fn already_has_same_minor_number_as_all(&self, indices: &[InstanceIdx], arena: &[Instance]) -> bool {
+    if matches!(&*self.descriptor.specifier, Specifier::None) {
+      return false;
+    }
+    match self.descriptor.specifier.get_node_version() {
+      None => false,
+      Some(a) => indices.iter().all(|idx| {
+        let other_instance = &arena[idx.0];
         if matches!(&*other_instance.descriptor.specifier, Specifier::None) {
           return false;
         }
@@ -384,54 +461,32 @@ impl Instance {
       .unwrap_or(false)
   }
 
-  /// Delete from the package.json
-  pub fn remove(&self) {
+  /// Delete this instance from its underlying `Source`. No-op for
+  /// `PnpmYaml`-sourced instances (pnpm catalog removal lands with the
+  /// Banned-catalog work).
+  pub fn remove(&self, disk: &mut Disk, source: &Source) {
+    let Source::Package { file_idx, .. } = source else {
+      debug!("Cannot remove pnpm catalog instance from a package.json");
+      return;
+    };
+    let file = &mut disk.package_json_files[*file_idx];
     match self.descriptor.dependency_type.strategy {
-      Strategy::NameAndVersionProps => {
+      Strategy::NameAndVersionProps | Strategy::NamedVersionString | Strategy::UnnamedVersionString => {
         let path_to_prop = &self.descriptor.dependency_type.path;
         if let Some(parent_path) = path_to_prop.rfind('/') {
-          let parent_path = &path_to_prop[..parent_path];
-          let prop_name = &path_to_prop[parent_path.len() + 1..];
-          if let Some(Value::Object(obj)) = self.descriptor.package.borrow_mut().contents.borrow_mut().pointer_mut(parent_path) {
-            obj.remove(prop_name);
-          }
+          let parent_pointer = &path_to_prop[..parent_path];
+          let prop_name = &path_to_prop[parent_path + 1..];
+          crate::disk::remove_prop(file, parent_pointer, prop_name);
         } else if path_to_prop == "/" {
-          debug!("Cannot remove root property for NameAndVersionProps");
-        }
-      }
-      Strategy::NamedVersionString => {
-        let path_to_prop = &self.descriptor.dependency_type.path;
-        if let Some(parent_path) = path_to_prop.rfind('/') {
-          let parent_path = &path_to_prop[..parent_path];
-          let prop_name = &path_to_prop[parent_path.len() + 1..];
-          if let Some(Value::Object(obj)) = self.descriptor.package.borrow_mut().contents.borrow_mut().pointer_mut(parent_path) {
-            obj.remove(prop_name);
-          }
-        } else if path_to_prop == "/" {
-          debug!("Cannot remove root property for NamedVersionString");
-        }
-      }
-      Strategy::UnnamedVersionString => {
-        let path_to_prop = &self.descriptor.dependency_type.path;
-        if let Some(parent_path) = path_to_prop.rfind('/') {
-          let parent_path = &path_to_prop[..parent_path];
-          let prop_name = &path_to_prop[parent_path.len() + 1..];
-          if let Some(Value::Object(obj)) = self.descriptor.package.borrow_mut().contents.borrow_mut().pointer_mut(parent_path) {
-            obj.remove(prop_name);
-          }
-        } else if path_to_prop == "/" {
-          debug!("Cannot remove root property for UnnamedVersionString");
+          debug!("Cannot remove root property");
         }
       }
       Strategy::VersionsByName => {
         let path_to_obj = &self.descriptor.dependency_type.path;
-        let name = &self.descriptor.name;
-        if let Some(Value::Object(obj)) = self.descriptor.package.borrow_mut().contents.borrow_mut().pointer_mut(path_to_obj) {
-          obj.remove(name);
-        }
+        crate::disk::remove_prop(file, path_to_obj, &self.descriptor.name);
       }
       Strategy::InvalidConfig => {
-        panic!("unrecognised strategy");
+        unreachable!("unrecognised strategy");
       }
     };
   }

@@ -1,64 +1,91 @@
-use crate::{commands::ui, context::Context};
+use crate::{commands::reporter::FormatReporter, context::Context, disk::DiskIo, errors::SynopkgError, source::Source};
 
-pub fn run(ctx: Context) -> i32 {
+pub fn run<D: DiskIo>(ctx: Context, reporter: &dyn FormatReporter, io: &D) -> Result<Context, SynopkgError> {
   if ctx.config.cli.check {
-    check_formatting(ctx)
+    check_formatting(ctx, reporter)
   } else {
-    fix_formatting(ctx)
+    fix_formatting(ctx, reporter, io)
   }
 }
 
-fn check_formatting(ctx: Context) -> i32 {
+fn check_formatting(ctx: Context, reporter: &dyn FormatReporter) -> Result<Context, SynopkgError> {
   let mut is_invalid = false;
-  ctx
-    .packages
-    .all
-    .iter()
-    .filter(|package| package.borrow().has_formatting_mismatches())
-    .for_each(|package| {
-      is_invalid = true;
-      ui::package::print_invalid_package(&ctx, &package.borrow());
-      package.borrow().formatting_mismatches.borrow().iter().for_each(|mismatch| {
-        ui::package::print_invalid(&ctx, mismatch);
-      });
+  for source in ctx.sources.all.iter() {
+    let Source::Package {
+      file_idx,
+      name,
+      formatting_mismatches,
+    } = source
+    else {
+      continue;
+    };
+    if formatting_mismatches.is_empty() {
+      continue;
+    }
+    is_invalid = true;
+    let file = &ctx.disk.package_json_files[*file_idx];
+    reporter.on_package_header(&ctx, name, &file.filepath, formatting_mismatches.len());
+    formatting_mismatches.iter().for_each(|mismatch| {
+      reporter.on_mismatch_unfixed(&ctx, name, &file.filepath, mismatch);
     });
+  }
   if !is_invalid {
-    ui::util::print_no_issues_found();
+    reporter.on_no_issues();
   }
-  if is_invalid {
-    1
-  } else {
-    0
-  }
+  if is_invalid { Err(SynopkgError::IssuesFound) } else { Ok(ctx) }
 }
 
-fn fix_formatting(ctx: Context) -> i32 {
+fn fix_formatting<D: DiskIo>(mut ctx: Context, reporter: &dyn FormatReporter, io: &D) -> Result<Context, SynopkgError> {
   let mut was_invalid = false;
-  ctx
-    .packages
-    .all
-    .iter()
-    .filter(|package| package.borrow().has_formatting_mismatches())
-    .for_each(|package| {
-      was_invalid = true;
-      let package = package.borrow();
-      ui::package::print_fixed_package(&ctx, &package);
-      package.formatting_mismatches.borrow().iter().for_each(|mismatch| {
-        ui::package::print_fixed(&ctx, mismatch);
-        if mismatch.property_path == "/" {
-          *package.contents.borrow_mut() = mismatch.expected.clone();
-        } else if let Some(value) = package.contents.borrow_mut().pointer_mut(&mismatch.property_path) {
-          *value = mismatch.expected.clone();
-        }
-      });
-    });
+  // Tuples of (sources arena slot, file_idx, name, mismatch_count) so the
+  // immutable borrow of sources ends before we re-borrow mutably below.
+  let mut fix_targets: Vec<(usize, usize)> = vec![];
+
+  for (i, source) in ctx.sources.all.iter().enumerate() {
+    let Source::Package {
+      file_idx,
+      name,
+      formatting_mismatches,
+    } = source
+    else {
+      continue;
+    };
+    if formatting_mismatches.is_empty() {
+      continue;
+    }
+    was_invalid = true;
+    let file = &ctx.disk.package_json_files[*file_idx];
+    reporter.on_package_header(&ctx, name, &file.filepath, formatting_mismatches.len());
+    for mismatch in formatting_mismatches.iter() {
+      reporter.on_mismatch_fixed(&ctx, name, &file.filepath, mismatch);
+    }
+    fix_targets.push((i, *file_idx));
+  }
+
+  // Apply mismatches: drain each source's vec to drop the immutable borrow,
+  // then mutate disk.package_json_files[file_idx].
+  for (source_idx, file_idx) in fix_targets {
+    // Drain mismatches out of the source first so we don't hold a borrow
+    // when mutating disk.
+    let mismatches = match &mut ctx.sources.all[source_idx] {
+      Source::Package { formatting_mismatches, .. } => std::mem::take(formatting_mismatches),
+      Source::PnpmYaml => continue,
+    };
+    let file = &mut ctx.disk.package_json_files[file_idx];
+    for mismatch in mismatches {
+      crate::disk::set_prop(file, &mismatch.property_path, mismatch.expected);
+    }
+  }
+
   if !ctx.config.cli.dry_run {
-    ctx.packages.all.iter().for_each(|package| {
-      package.borrow().write_to_disk(&ctx.config);
-    });
+    let indent = ctx.config.rcfile.indent.as_deref();
+    let fallback = ctx.disk.formatting_fallback();
+    for file in ctx.disk.package_json_files.iter_mut() {
+      crate::disk::write_json_file(file, io, indent, &fallback)?;
+    }
   }
   if !was_invalid {
-    ui::util::print_no_issues_found();
+    reporter.on_no_issues();
   }
-  0
+  Ok(ctx)
 }

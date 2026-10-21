@@ -1,6 +1,7 @@
 import { rehypeHeadingIds } from '@astrojs/markdown-remark';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
+import astroBrokenLinksChecker from 'astro-broken-links-checker';
 import rehypeExternalLinks from 'rehype-external-links';
 import { headingAnchorLinks } from './remark-plugins/heading-anchor-links.mjs';
 import { linkAliases } from './remark-plugins/link-aliases.mjs';
@@ -17,6 +18,11 @@ export default defineConfig({
     remarkPlugins: [sectionWrapper, linkAliases],
   },
   integrations: [
+    astroBrokenLinksChecker({
+      checkExternalLinks: false,
+      cacheExternalLinks: true,
+      throwError: true,
+    }),
     tocSchemaMicrodata(),
     starlight({
       title: 'Synopkg',
@@ -56,7 +62,6 @@ export default defineConfig({
       expressiveCode: {
         themes: ['everforest-dark', 'everforest-light'],
         removeUnusedThemes: false,
-        frames: false,
         styleOverrides: {
           // Borders and spacing
           borderRadius: '6px',
@@ -81,19 +86,24 @@ export default defineConfig({
       sidebar: [
         {
           label: 'Guides',
-          autogenerate: { directory: 'guide' },
+          items: [{ autogenerate: { directory: 'guide' } }],
         },
         {
           label: 'Commands',
-          autogenerate: { directory: 'command' },
+          items: [{ autogenerate: { directory: 'command' } }],
         },
         {
           label: 'Version Groups',
-          autogenerate: { directory: 'version-groups' },
+          items: [{ autogenerate: { directory: 'version-groups' } }],
         },
         {
           label: 'Semver Groups',
-          autogenerate: { directory: 'semver-groups' },
+          items: [{ autogenerate: { directory: 'semver-groups' } }],
+        },
+        {
+          label: 'Update Groups',
+          badge: 'New',
+          items: [{ autogenerate: { directory: 'update-groups' } }],
         },
         {
           label: 'Configuration File',
@@ -105,19 +115,23 @@ export default defineConfig({
             'config/format-repository',
             'config/indent',
             'config/max-concurrent-requests',
+            'config/minimum-release-age',
             { label: 'semverGroups', link: '/semver-groups/' },
+            'config/severity',
             'config/sort-az',
             'config/sort-exports',
             'config/sort-first',
             'config/sort-packages',
             'config/source',
+            'config/source-mode',
             'config/strict',
+            { label: 'updateGroups', link: '/update-groups/', badge: 'New' },
             { label: 'versionGroups', link: '/version-groups/' },
           ],
         },
         {
           label: 'Reference',
-          autogenerate: { directory: 'reference' },
+          items: ['dependency-types', 'glossary', 'specifier-types', { label: 'Status Codes', link: '/status/' }],
         },
       ],
       components: {

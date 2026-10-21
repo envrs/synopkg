@@ -1,10 +1,13 @@
 use {
   crate::{
     dependency::UpdateUrl,
-    registry_client::{AllPackageVersions, RegistryClient, RegistryError},
+    registry::client::{AllPackageVersions, RegistryClient, RegistryError},
   },
   reqwest::StatusCode,
-  std::collections::BTreeMap,
+  std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+  },
 };
 
 /// A mock implementation of RegistryClient for testing
@@ -12,18 +15,23 @@ use {
 pub struct MockRegistryClient {
   // Maps package names to a list of versions
   pub package_data: BTreeMap<String, Vec<String>>,
+  // Optional per-version publish timestamps keyed by package name
+  pub package_times: BTreeMap<String, HashMap<String, String>>,
 }
 
 #[async_trait::async_trait]
 impl RegistryClient for MockRegistryClient {
   /// Return a dynamically constructed PackageMeta based on the package name
-  async fn fetch(&self, update_url: &UpdateUrl) -> Result<AllPackageVersions, RegistryError> {
+  async fn fetch(&self, update_url: &UpdateUrl) -> Result<Arc<AllPackageVersions>, RegistryError> {
     self
       .package_data
       .get(&update_url.internal_name)
-      .map(|versions| AllPackageVersions {
-        name: update_url.internal_name.to_string(),
-        versions: versions.clone(),
+      .map(|versions| {
+        Arc::new(AllPackageVersions {
+          name: update_url.internal_name.to_string(),
+          versions: versions.clone(),
+          times: self.package_times.get(&update_url.internal_name).cloned().unwrap_or_default(),
+        })
       })
       .ok_or_else(|| RegistryError::HttpError {
         url: update_url.internal_name.to_string(),
@@ -51,6 +59,16 @@ impl MockRegistryClient {
         }
       }
     }
-    MockRegistryClient { package_data }
+    MockRegistryClient {
+      package_data,
+      package_times: BTreeMap::new(),
+    }
+  }
+
+  /// Attach publish timestamps for a package's versions. Used by tests
+  /// that exercise the `minimumReleaseAge` filter.
+  pub fn with_times(mut self, package: &str, times: HashMap<String, String>) -> Self {
+    self.package_times.insert(package.to_string(), times);
+    self
   }
 }

@@ -1,23 +1,108 @@
 use {
   crate::{
-    dependency_type::DependencyType,
+    dependency::DependencyType,
+    errors::UnsupportedConfigError,
     group_selector::GroupSelector,
-    packages::Packages,
-    semver_group::{AnySemverGroup, SemverGroup},
-    version_group::{AnyVersionGroup, VersionGroup},
+    instance::severity::SeverityMap,
+    sources::Sources,
+    version_group::{AnyVersionGroup, CatalogDefsGroup, VersionGroup},
   },
-  log::error,
+  semver_group::{AnySemverGroup, SemverGroup},
   serde::Deserialize,
   serde_json::Value,
-  std::{collections::HashMap, process::exit},
+  std::{
+    collections::{BTreeMap, HashMap},
+    mem,
+  },
+  update_group::{AnyUpdateGroup, UpdateGroup},
 };
 
-mod discovery;
-mod error;
-mod javascript;
-mod json;
-mod package_json;
-mod yaml;
+pub mod from_disk;
+#[cfg(test)]
+#[path = "rcfile_test.rs"]
+mod rcfile_test;
+pub mod semver_group;
+pub mod update_group;
+
+pub fn compute_all_dependency_types(custom_types: &HashMap<String, CustomType>) -> Result<Vec<DependencyType>, UnsupportedConfigError> {
+  let default_types = HashMap::from([
+    (
+      String::from("dev"),
+      CustomType {
+        strategy: String::from("versionsByName"),
+        name_path: None,
+        path: String::from("devDependencies"),
+        source: None,
+        unknown_fields: HashMap::new(),
+      },
+    ),
+    (
+      String::from("local"),
+      CustomType {
+        strategy: String::from("name~version"),
+        name_path: Some(String::from("name")),
+        path: String::from("version"),
+        source: None,
+        unknown_fields: HashMap::new(),
+      },
+    ),
+    (
+      String::from("overrides"),
+      CustomType {
+        strategy: String::from("versionsByName"),
+        name_path: None,
+        path: String::from("overrides"),
+        source: None,
+        unknown_fields: HashMap::new(),
+      },
+    ),
+    (
+      String::from("peer"),
+      CustomType {
+        strategy: String::from("versionsByName"),
+        name_path: None,
+        path: String::from("peerDependencies"),
+        source: None,
+        unknown_fields: HashMap::new(),
+      },
+    ),
+    (
+      String::from("pnpmOverrides"),
+      CustomType {
+        strategy: String::from("versionsByName"),
+        name_path: None,
+        path: String::from("overrides"),
+        source: Some(String::from("PnpmWorkspace")),
+        unknown_fields: HashMap::new(),
+      },
+    ),
+    (
+      String::from("prod"),
+      CustomType {
+        strategy: String::from("versionsByName"),
+        name_path: None,
+        path: String::from("dependencies"),
+        source: None,
+        unknown_fields: HashMap::new(),
+      },
+    ),
+    (
+      String::from("resolutions"),
+      CustomType {
+        strategy: String::from("versionsByName"),
+        name_path: None,
+        path: String::from("resolutions"),
+        source: None,
+        unknown_fields: HashMap::new(),
+      },
+    ),
+  ]);
+  default_types
+    .iter()
+    .chain(custom_types.iter())
+    .map(|(name, custom_type)| DependencyType::new(name, custom_type))
+    .collect()
+}
 
 fn empty_custom_types() -> HashMap<String, CustomType> {
   HashMap::new()
@@ -27,6 +112,11 @@ fn default_max_concurrent_requests() -> usize {
   12
 }
 
+/// Default `minimumReleaseAge` (one day in minutes) used when neither the
+/// rcfile nor `pnpm-workspace.yaml` provides a value. Resolution lives in
+/// `rcfile::from_disk::resolve_minimum_release_age`.
+pub(crate) const DEFAULT_MINIMUM_RELEASE_AGE: u64 = 1440;
+
 fn default_true() -> bool {
   true
 }
@@ -35,8 +125,8 @@ fn default_false() -> bool {
   false
 }
 
-fn default_indent() -> String {
-  "  ".to_string()
+fn default_indent() -> Option<String> {
+  None
 }
 
 fn default_sort_az() -> Vec<String> {
@@ -82,12 +172,42 @@ fn default_source() -> Vec<String> {
   vec![]
 }
 
+/// How user-supplied source patterns combine with workspace discovery.
+///
+/// - `Replace` (default): user patterns from `--source` or rcfile `source` replace the discovered patterns entirely. Discovery is skipped.
+/// - `Extend`: user patterns are appended to discovered patterns so a project can keep its `workspaces` / `pnpm-workspace.yaml` /
+///   `lerna.json` packages *and* pull in extra paths.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceMode {
+  #[default]
+  Replace,
+  Extend,
+}
+
+impl std::str::FromStr for SourceMode {
+  type Err = String;
+
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    match s {
+      "replace" => Ok(SourceMode::Replace),
+      "extend" => Ok(SourceMode::Extend),
+      other => Err(format!("invalid value '{other}' for sourceMode: expected 'replace' or 'extend'")),
+    }
+  }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomType {
   pub strategy: String,
   pub name_path: Option<String>,
   pub path: String,
+  /// Which source file kind this dep type reads from. Defaults to
+  /// `"PackageJson"` when omitted. Recognised values: `"PackageJson"`,
+  /// `"PnpmWorkspace"`. Parsed via `SourceKind::parse` in
+  /// `DependencyType::new`.
+  pub source: Option<String>,
   #[serde(flatten)]
   pub unknown_fields: HashMap<String, Value>,
 }
@@ -108,9 +228,10 @@ pub struct DependencyGroup {
   pub unknown_fields: HashMap<String, Value>,
 }
 
+/// Raw deserialized config file. Converted to `Rcfile` via `From<RawRcfile>`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Rcfile {
+pub(crate) struct RawRcfile {
   #[serde(rename = "$schema", skip_serializing)]
   _schema: Option<serde::de::IgnoredAny>,
   #[serde(default = "empty_custom_types")]
@@ -122,11 +243,18 @@ pub struct Rcfile {
   #[serde(default = "default_false")]
   pub format_repository: bool,
   #[serde(default = "default_indent")]
-  pub indent: String,
+  pub indent: Option<String>,
   #[serde(default = "default_max_concurrent_requests")]
   pub max_concurrent_requests: usize,
+  /// User-supplied value from the rcfile. `None` means "fall back to
+  /// pnpm-workspace.yaml or the default" — resolution happens in
+  /// `from_disk::resolve_minimum_release_age`.
+  #[serde(default)]
+  pub minimum_release_age: Option<u64>,
   #[serde(default)]
   pub semver_groups: Vec<AnySemverGroup>,
+  #[serde(default)]
+  pub update_groups: Vec<AnyUpdateGroup>,
   #[serde(default = "default_sort_az")]
   pub sort_az: Vec<String>,
   #[serde(default = "default_sort_exports")]
@@ -137,6 +265,8 @@ pub struct Rcfile {
   pub sort_packages: bool,
   #[serde(default = "default_source")]
   pub source: Vec<String>,
+  #[serde(default)]
+  pub source_mode: SourceMode,
   #[serde(default = "default_false")]
   pub strict: bool,
   #[serde(default)]
@@ -145,197 +275,235 @@ pub struct Rcfile {
   pub unknown_fields: HashMap<String, Value>,
 }
 
-impl Default for Rcfile {
-  fn default() -> Self {
-    serde_json::from_str("{}").expect("An empty object should produce a default Rcfile")
-  }
-}
-
-impl Rcfile {
+impl RawRcfile {
   /// Handle config that is no longer supported or was hallucinated by an LLM
-  pub fn visit_unknown_rcfile_fields(&self) {
-    let mut is_valid = true;
+  pub fn validate_unknown_fields(&self) -> Result<(), Vec<UnsupportedConfigError>> {
+    let mut errors: Vec<UnsupportedConfigError> = vec![];
     self.unknown_fields.iter().for_each(|(key, _)| match key.as_str() {
       "dependencyTypes" => {
-        error!("Config property 'dependencyTypes' is deprecated");
-        error!("Use CLI flag instead: --dependency-types prod,dev,peer");
-        is_valid = false;
+        errors.push(UnsupportedConfigError::DeprecatedProperty {
+          property: key.clone(),
+          hint: "Use CLI flag instead: --dependency-types prod,dev,peer".to_string(),
+        });
       }
       "specifierTypes" => {
-        error!("Config property 'specifierTypes' is deprecated");
-        error!("Use CLI flag instead: --specifier-types exact,range");
-        is_valid = false;
+        errors.push(UnsupportedConfigError::DeprecatedProperty {
+          property: key.clone(),
+          hint: "Use CLI flag instead: --specifier-types exact,range".to_string(),
+        });
       }
       "lintFormatting" => {
-        error!("Config property 'lintFormatting' is deprecated");
-        error!("Use 'synopkg format --check' to validate formatting");
-        is_valid = false;
+        errors.push(UnsupportedConfigError::DeprecatedProperty {
+          property: key.clone(),
+          hint: "Use 'synopkg format --check' to validate formatting".to_string(),
+        });
       }
       "lintSemverRanges" => {
-        error!("Config property 'lintSemverRanges' is deprecated");
-        error!("Semver range checking is always enabled in 'synopkg lint'");
-        is_valid = false;
+        errors.push(UnsupportedConfigError::DeprecatedProperty {
+          property: key.clone(),
+          hint: "Semver range checking is always enabled in 'synopkg lint'".to_string(),
+        });
       }
       "lintVersions" => {
-        error!("Config property 'lintVersions' is deprecated");
-        error!("Version checking is always enabled in 'synopkg lint'");
-        is_valid = false;
+        errors.push(UnsupportedConfigError::DeprecatedProperty {
+          property: key.clone(),
+          hint: "Version checking is always enabled in 'synopkg lint'".to_string(),
+        });
       }
       _ => {
-        error!("Config property '{key}' is not recognised");
-        is_valid = false;
+        if !key.starts_with("//") {
+          errors.push(UnsupportedConfigError::UnrecognisedProperty { path: key.clone() });
+        }
       }
     });
     self.custom_types.iter().for_each(|(custom_type_name, value)| {
-      value.unknown_fields.iter().for_each(|(field_name, _)| {
-        error!("Config property 'customTypes.{custom_type_name}.{field_name}' is not recognised");
-        is_valid = false;
+      value.unknown_fields.iter().for_each(|(key, _)| {
+        if !key.starts_with("//") {
+          errors.push(UnsupportedConfigError::UnrecognisedProperty {
+            path: format!("customTypes.{custom_type_name}.{key}"),
+          });
+        }
       });
     });
     self.dependency_groups.iter().enumerate().for_each(|(index, value)| {
       value.unknown_fields.iter().for_each(|(key, _)| {
-        error!("Config property 'dependencyGroups[{index}].{key}' is not recognised");
-        is_valid = false;
+        if !key.starts_with("//") {
+          errors.push(UnsupportedConfigError::UnrecognisedProperty {
+            path: format!("dependencyGroups[{index}].{key}"),
+          });
+        }
       });
     });
     self.semver_groups.iter().enumerate().for_each(|(index, value)| {
       value.unknown_fields.iter().for_each(|(key, _)| {
-        error!("Config property 'semverGroups[{index}].{key}' is not recognised");
-        is_valid = false;
+        if !key.starts_with("//") {
+          errors.push(UnsupportedConfigError::UnrecognisedProperty {
+            path: format!("semverGroups[{index}].{key}"),
+          });
+        }
+      });
+    });
+    self.update_groups.iter().enumerate().for_each(|(index, value)| {
+      value.unknown_fields.iter().for_each(|(key, _)| {
+        if !key.starts_with("//") {
+          errors.push(UnsupportedConfigError::UnrecognisedProperty {
+            path: format!("updateGroups[{index}].{key}"),
+          });
+        }
       });
     });
     self.version_groups.iter().enumerate().for_each(|(index, value)| {
       value.unknown_fields.iter().for_each(|(key, _)| {
-        error!("Config property 'versionGroups[{index}].{key}' is not recognised");
-        is_valid = false;
+        if !key.starts_with("//") {
+          errors.push(UnsupportedConfigError::UnrecognisedProperty {
+            path: format!("versionGroups[{index}].{key}"),
+          });
+        }
       });
     });
-    if !is_valid {
-      error!("synopkg will exit due to an invalid config file, see https://envrs.github.io/synopkg for documentation");
-      exit(1);
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
+  }
+}
+
+/// Validate dependency-type filter strings against the post-discovery list of
+/// dependency types. Used by `Context::create` after catalog dep types have
+/// been appended.
+pub fn validate_raw_dep_types(raw: &[String], all: &[DependencyType]) -> Result<(), UnsupportedConfigError> {
+  for s in raw {
+    let name = s.trim_start_matches('!');
+    if name != "**" && !all.iter().any(|dt| dt.name == name) {
+      return Err(UnsupportedConfigError::InvalidDependencyType { name: name.to_string() });
     }
   }
+  Ok(())
+}
 
-  /// Create every alias defined in the rcfile.
-  pub fn get_dependency_groups(&self, packages: &Packages, all_dependency_types: &[DependencyType]) -> Vec<GroupSelector> {
+impl TryFrom<RawRcfile> for Rcfile {
+  type Error = UnsupportedConfigError;
+
+  fn try_from(raw: RawRcfile) -> Result<Self, UnsupportedConfigError> {
+    // Dep-type validation for `dependency_groups`, `semver_groups`, and
+    // `version_groups` is deferred to `Context::create` so user-referenced
+    // catalog dep types like `pnpmCatalog:react18` (which only exist after
+    // catalog discovery) resolve correctly.
+    let all_dependency_types = compute_all_dependency_types(&raw.custom_types)?;
+    let mut dependency_groups = vec![];
+    for dg in raw.dependency_groups {
+      let selector = GroupSelector::new(dg.dependencies, dg.dependency_types, dg.alias_name, dg.packages, dg.specifier_types);
+      dependency_groups.push(selector);
+    }
+    let mut semver_groups = vec![SemverGroup::get_exact_local_specifiers()];
+    for group_config in raw.semver_groups {
+      let semver_group = SemverGroup::from_config(group_config)?;
+      semver_groups.push(semver_group);
+    }
+    semver_groups.push(SemverGroup::get_catch_all());
+
+    let mut update_groups = vec![];
+    for group_config in raw.update_groups {
+      update_groups.push(UpdateGroup::from_config(group_config)?);
+    }
+
+    Ok(Rcfile {
+      dependency_groups,
+      format_bugs: raw.format_bugs,
+      format_repository: raw.format_repository,
+      indent: raw.indent,
+      max_concurrent_requests: raw.max_concurrent_requests,
+      // `from_disk` re-resolves this against pnpm-workspace.yaml. The
+      // `try_from`-only paths (tests, `Rcfile::default()`) get the
+      // default here so consumers always see a `u64`.
+      minimum_release_age: raw.minimum_release_age.unwrap_or(DEFAULT_MINIMUM_RELEASE_AGE),
+      semver_groups,
+      sort_az: raw.sort_az,
+      sort_exports: raw.sort_exports,
+      sort_first: raw.sort_first,
+      sort_packages: raw.sort_packages,
+      source: raw.source,
+      source_mode: raw.source_mode,
+      strict: raw.strict,
+      update_groups,
+      version_groups: raw.version_groups,
+      all_dependency_types,
+    })
+  }
+}
+
+#[derive(Debug)]
+pub struct Rcfile {
+  pub dependency_groups: Vec<GroupSelector>,
+  pub format_bugs: bool,
+  pub format_repository: bool,
+  pub indent: Option<String>,
+  pub max_concurrent_requests: usize,
+  /// Skip dependency updates published less than this many minutes ago.
+  /// `0` disables age filtering. Resolved with precedence:
+  /// rcfile → `pnpm-workspace.yaml` → `DEFAULT_MINIMUM_RELEASE_AGE`.
+  pub minimum_release_age: u64,
+  pub semver_groups: Vec<SemverGroup>,
+  pub sort_az: Vec<String>,
+  pub sort_exports: Vec<String>,
+  pub sort_first: Vec<String>,
+  pub sort_packages: bool,
+  pub source: Vec<String>,
+  pub source_mode: SourceMode,
+  pub strict: bool,
+  pub update_groups: Vec<UpdateGroup>,
+  pub version_groups: Vec<AnyVersionGroup>,
+  /// All dependency types (built-in + custom). Computed after deserialization.
+  pub all_dependency_types: Vec<DependencyType>,
+}
+
+impl Default for Rcfile {
+  fn default() -> Self {
+    serde_json::from_str::<RawRcfile>("{}")
+      .expect("An empty object should produce a default Rcfile")
+      .try_into()
+      .expect("Default Rcfile should always be valid")
+  }
+}
+
+impl Rcfile {
+  /// Names of catalog dep types currently registered in `all_dependency_types`
+  /// (e.g. `pnpmCatalog`, `bunCatalog`, `pnpmCatalog:react18`).
+  ///
+  /// Filters by the `is_catalog_definition` flag — set to `true` only for
+  /// built-in auto-generated catalog dep types. User `customTypes` named
+  /// like `pnpmCatalogLike` are NOT picked up.
+  pub(crate) fn catalog_dep_type_names(&self) -> Vec<String> {
     self
-      .dependency_groups
+      .all_dependency_types
       .iter()
-      .map(|dependency_group_config| {
-        GroupSelector::new(
-          /* all_packages: */ packages,
-          /* include_dependencies: */ dependency_group_config.dependencies.clone(),
-          /* include_dependency_types: */ dependency_group_config.dependency_types.clone(),
-          /* alias_name: */ dependency_group_config.alias_name.clone(),
-          /* include_packages: */ dependency_group_config.packages.clone(),
-          /* include_specifier_types: */ dependency_group_config.specifier_types.clone(),
-          /* all_dependency_types: */ all_dependency_types,
-        )
-      })
+      .filter(|dt| dt.is_catalog_definition)
+      .map(|dt| dt.name.clone())
       .collect()
   }
 
-  /// Create every semver group defined in the rcfile.
-  pub fn get_semver_groups(&self, packages: &Packages, all_dependency_types: &[DependencyType]) -> Vec<SemverGroup> {
-    let mut all_groups: Vec<SemverGroup> = vec![];
-    all_groups.push(SemverGroup::get_exact_local_specifiers(all_dependency_types));
-    self.semver_groups.iter().for_each(|group_config| {
-      all_groups.push(SemverGroup::from_config(group_config, packages, all_dependency_types));
-    });
-    all_groups.push(SemverGroup::get_catch_all(all_dependency_types));
-    all_groups
+  #[cfg(test)]
+  pub(crate) fn catalog_dep_type_names_for_test(&self) -> Vec<String> {
+    self.catalog_dep_type_names()
   }
 
   /// Create every version group defined in the rcfile.
-  pub fn get_version_groups(&self, packages: &Packages, all_dependency_types: &[DependencyType]) -> Vec<VersionGroup> {
-    let mut all_groups: Vec<VersionGroup> = self
-      .version_groups
-      .iter()
-      .map(|group_config| VersionGroup::from_config(group_config, packages, all_dependency_types))
-      .collect();
-    all_groups.push(VersionGroup::get_catch_all(all_dependency_types));
-    all_groups
-  }
-
-  /// Get all custom types defined in the rcfile, combined with the default
-  /// types.
-  pub fn get_all_dependency_types(&self) -> Vec<DependencyType> {
-    // Custom dependency types defined in the rcfile
-    let custom_types = &self.custom_types;
-    // Internal dependency types are also defined as custom types
-    let default_types = HashMap::from([
-      (
-        String::from("dev"),
-        CustomType {
-          strategy: String::from("versionsByName"),
-          name_path: None,
-          path: String::from("devDependencies"),
-          unknown_fields: HashMap::new(),
-        },
-      ),
-      (
-        String::from("local"),
-        CustomType {
-          strategy: String::from("name~version"),
-          name_path: Some(String::from("name")),
-          path: String::from("version"),
-          unknown_fields: HashMap::new(),
-        },
-      ),
-      (
-        String::from("overrides"),
-        CustomType {
-          strategy: String::from("versionsByName"),
-          name_path: None,
-          path: String::from("overrides"),
-          unknown_fields: HashMap::new(),
-        },
-      ),
-      (
-        String::from("peer"),
-        CustomType {
-          strategy: String::from("versionsByName"),
-          name_path: None,
-          path: String::from("peerDependencies"),
-          unknown_fields: HashMap::new(),
-        },
-      ),
-      (
-        String::from("pnpmOverrides"),
-        CustomType {
-          strategy: String::from("versionsByName"),
-          name_path: None,
-          path: String::from("pnpm.overrides"),
-          unknown_fields: HashMap::new(),
-        },
-      ),
-      (
-        String::from("prod"),
-        CustomType {
-          strategy: String::from("versionsByName"),
-          name_path: None,
-          path: String::from("dependencies"),
-          unknown_fields: HashMap::new(),
-        },
-      ),
-      (
-        String::from("resolutions"),
-        CustomType {
-          strategy: String::from("versionsByName"),
-          name_path: None,
-          path: String::from("resolutions"),
-          unknown_fields: HashMap::new(),
-        },
-      ),
-    ]);
-    // Collect which dependency types are enabled
-    let mut dependency_types: Vec<DependencyType> = vec![];
-    default_types.iter().for_each(|(name, custom_type)| {
-      dependency_types.push(DependencyType::new(name, custom_type));
-    });
-    custom_types.iter().for_each(|(name, custom_type)| {
-      dependency_types.push(DependencyType::new(name, custom_type));
-    });
-    dependency_types
+  ///
+  /// Auto-injects a `CatalogDefs` catch-all immediately before the default
+  /// `PreferredSemver` catch-all, but only when at least one catalog dep
+  /// type exists. Non-catalog projects see no injection.
+  pub fn get_version_groups(&mut self, sources: &Sources) -> Result<Vec<VersionGroup>, UnsupportedConfigError> {
+    let mut all_groups: Vec<VersionGroup> = mem::take(&mut self.version_groups)
+      .into_iter()
+      .enumerate()
+      .map(|(index, group_config)| VersionGroup::from_config(group_config, index, sources))
+      .collect::<Result<Vec<_>, _>>()?;
+    let catalog_dep_type_names = self.catalog_dep_type_names();
+    if !catalog_dep_type_names.is_empty() {
+      all_groups.push(VersionGroup::CatalogDefs(CatalogDefsGroup {
+        selector: GroupSelector::new(vec![], catalog_dep_type_names, "Catalog Definitions".into(), vec![], vec![]),
+        dependencies: BTreeMap::new(),
+        severity: SeverityMap::new(),
+      }));
+    }
+    all_groups.push(VersionGroup::get_catch_all());
+    Ok(all_groups)
   }
 }

@@ -11,18 +11,20 @@ import DryRunOption from "@partials/option/dry-run.mdx";
 import HelpOption from "@partials/option/help.mdx";
 import LogLevelsOption from "@partials/option/log-levels.mdx";
 import NoAnsiOption from "@partials/option/no-ansi.mdx";
+import ReporterOption from "@partials/option/reporter-fix.mdx";
 import ShowOption from "@partials/option/show-versions.mdx";
 import SortOption from "@partials/option/sort.mdx";
 import SourceOption from "@partials/option/source.mdx";
+import SourceModeOption from "@partials/option/source-mode.mdx";
 import SpecifierTypesOption from "@partials/option/specifier-types.mdx";
 
 import QuoteFilters from "@partials/tips/quote-filters.mdx";
 
-Fix version mismatches in your monorepo. When the same dependency has different versions across packages, `fix` updates them to match your configuration rules. Use this to resolve issues reported by `lint`. Does not fix formatting—use `format` for that.
+Fix version mismatches in your monorepo. When the same dependency has different versions across packages, `fix` updates them to match your configuration rules. Use this to resolve issues reported by `lint`. Does not fix formatting. Use `format` for that.
 
 ## Examples
 
-```bash
+```bash frame="none"
 # Preview changes without modifying files
 synopkg fix --dry-run
 # Fix only dependencies and devDependencies (exclude peer, optional)
@@ -67,6 +69,10 @@ synopkg fix -h
 
 <NoAnsiOption command="fix" />
 
+### --reporter <Badge text="<reporter-name>" />
+
+<ReporterOption command="fix" />
+
 ### --show <Badge text="<comma-separated-detail-names>" />
 
 <ShowOption command="fix" />
@@ -78,6 +84,10 @@ synopkg fix -h
 ### --source <Badge text="<file-pattern>" />
 
 <SourceOption command="fix" />
+
+### --source-mode <Badge text="<replace|extend>" />
+
+<SourceModeOption command="fix" />
 
 ### --specifier-types <Badge text="<comma-separated-specifier-type-names>" />
 

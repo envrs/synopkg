@@ -1,40 +1,29 @@
 use {
-  crate::{dependency_type::DependencyType, group_selector::GroupSelector, packages::Packages},
-  clap::{builder::ValueParser, crate_description, crate_name, crate_version, Arg, ArgMatches, Command},
+  crate::{errors::SynopkgError, group_selector::GroupSelector, rcfile::SourceMode},
+  clap::{Arg, ArgMatches, Command, builder::ValueParser, crate_description, crate_name, crate_version},
   color_print::cformat,
   itertools::Itertools,
   log::LevelFilter,
-  std::{env, path::PathBuf},
+  std::{env, path::PathBuf, str::FromStr},
 };
 
-#[derive(Debug)]
-pub enum CliError {
-  CurrentDirFailed(String),
-}
-
-impl std::error::Error for CliError {}
-
-impl std::fmt::Display for CliError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      CliError::CurrentDirFailed(msg) => write!(f, "Failed to get current directory: {}", msg),
-    }
-  }
-}
+#[cfg(test)]
+#[path = "cli_test.rs"]
+mod cli_test;
 
 #[derive(Debug)]
 pub enum Subcommand {
-  Lint,
   Fix,
-  Format,
-  Update,
-  List,
-  Json,
-  ListMismatches,
-  LintSemverRanges,
   FixMismatches,
-  SetSemverRanges,
+  Format,
+  Json,
+  Lint,
+  LintSemverRanges,
+  List,
+  ListMismatches,
   Prompt,
+  SetSemverRanges,
+  Update,
 }
 
 #[derive(Debug)]
@@ -43,36 +32,29 @@ pub enum SortBy {
   Name,
 }
 
+pub use synopkg_specifier::update_target::UpdateTarget;
+
 #[derive(Debug)]
-pub enum UpdateTarget {
-  /// "*.*.*"
-  Latest,
-  /// "1.*.*"
-  Minor,
-  /// "1.2.*"
-  Patch,
+pub enum ReporterKind {
+  Pretty,
+  Json,
 }
 
 #[derive(Debug)]
 pub struct Cli {
   /// Whether to check formatting instead of fixing it
   pub check: bool,
-  /// Path to a specific config file to use
-  pub config_path: Option<String>,
+  /// Absolute path to a specific config file to use
+  pub config_path: Option<PathBuf>,
   /// The path to the root of the project
   pub cwd: PathBuf,
   /// Whether to disable ANSI color codes in terminal output
   pub disable_ansi: bool,
   /// Whether to simulate changes without writing them to disk
   pub dry_run: bool,
-  /// - `--dependencies` to filter by dependency name
-  pub dependencies: Vec<String>,
-  /// - `--dependency-types` to filter by dependency type
-  pub dependency_types: Vec<String>,
-  /// - `--packages` to filter by package name
-  pub packages: Vec<String>,
-  /// - `--specifier-types` to filter by specifier type
-  pub specifier_types: Vec<String>,
+  /// CLI filter combining --dependencies, --dependency-types, --packages,
+  /// and --specifier-types options into a single GroupSelector
+  pub filters: Option<GroupSelector>,
   /// Which severity levels of logging to display
   #[allow(dead_code)]
   pub log_levels: Vec<LevelFilter>,
@@ -91,99 +73,129 @@ pub struct Cli {
   pub sort: SortBy,
   /// Glob patterns for package.json files to inspect
   pub source_patterns: Vec<String>,
+  /// Whether `--source` / `source` patterns replace or extend workspace
+  /// discovery. `None` means "fall back to the rcfile's `sourceMode`".
+  pub source_mode: Option<SourceMode>,
   /// The subcommand that the user is running
   pub subcommand: Subcommand,
   /// How greedy npm updates should be
   pub target: UpdateTarget,
+  /// Output format for fix and format commands
+  pub reporter: ReporterKind,
+  /// Whether `update` should drive an interactive picker. Mutually
+  /// exclusive with `check` at the clap level.
+  pub interactive: bool,
+  /// Whether to bypass the on-disk npm registry cache. Only meaningful
+  /// for `update`.
+  pub no_cache: bool,
+}
+
+impl Default for Cli {
+  fn default() -> Self {
+    Self {
+      check: false,
+      config_path: None,
+      cwd: env::current_dir().unwrap_or_default(),
+      disable_ansi: false,
+      dry_run: false,
+      filters: None,
+      log_levels: vec![LevelFilter::Info, LevelFilter::Warn, LevelFilter::Error],
+      reporter: ReporterKind::Pretty,
+      show_hints: false,
+      show_ignored: false,
+      show_instances: false,
+      show_status_codes: false,
+      sort: SortBy::Name,
+      source_patterns: vec!["package.json".to_string(), "**/package.json".to_string()],
+      source_mode: None,
+      subcommand: Subcommand::Lint,
+      target: UpdateTarget::Latest,
+      interactive: false,
+      no_cache: false,
+    }
+  }
 }
 
 impl Cli {
   /// Parse all command-line arguments from the user into a `Cli` struct
-  pub fn parse() -> Result<Self, Box<dyn std::error::Error>> {
-    fn from_arg_matches(subcommand: Subcommand, matches: &ArgMatches) -> Result<Cli, Box<dyn std::error::Error>> {
-      Ok(Cli {
+  pub fn parse(args: &[String]) -> Result<Self, SynopkgError> {
+    fn from_arg_matches(subcommand: Subcommand, matches: &ArgMatches) -> Cli {
+      let cwd = env::current_dir().unwrap();
+      let dependencies = get_patterns(matches, "dependencies");
+      let dependency_types = get_patterns(matches, "dependency-types");
+      let packages = get_patterns(matches, "packages");
+      let specifier_types = get_patterns(matches, "specifier-types");
+      let filters = if dependencies.is_empty() && dependency_types.is_empty() && packages.is_empty() && specifier_types.is_empty() {
+        None
+      } else {
+        Some(GroupSelector::new(
+          dependencies,
+          dependency_types,
+          "CLI filters".to_string(),
+          packages,
+          specifier_types,
+        ))
+      };
+      Cli {
         check: (matches!(&subcommand, Subcommand::Format | Subcommand::Update)) && matches.get_flag("check"),
-        config_path: matches.get_one::<String>("config").cloned(),
-        cwd: env::current_dir().map_err(|e| Box::new(CliError::CurrentDirFailed(e.to_string())))?,
-        dependencies: get_patterns(matches, "dependencies"),
-        dependency_types: get_patterns(matches, "dependency-types"),
+        config_path: matches.get_one::<PathBuf>("config").map(|config_path| {
+          if config_path.is_absolute() {
+            config_path.clone()
+          } else {
+            cwd.join(config_path)
+          }
+        }),
+        interactive: matches!(&subcommand, Subcommand::Update)
+          && matches.try_get_one::<bool>("interactive").ok().flatten().copied().unwrap_or(false),
+        no_cache: matches!(&subcommand, Subcommand::Update)
+          && matches.try_get_one::<bool>("no-cache").ok().flatten().copied().unwrap_or(false),
+        cwd,
         disable_ansi: matches.get_flag("no-ansi"),
         dry_run: (matches!(&subcommand, Subcommand::Fix | Subcommand::Format | Subcommand::Update)) && matches.get_flag("dry-run"),
+        filters,
         log_levels: get_log_levels(matches),
-        packages: get_patterns(matches, "packages"),
+        reporter: get_reporter(&subcommand, matches),
         show_hints: should_show(matches, "hints"),
         show_ignored: should_show(matches, "ignored"),
         show_instances: should_show(matches, "instances"),
         show_status_codes: should_show(matches, "statuses"),
         sort: get_order_by(matches),
         source_patterns: get_patterns(matches, "source"),
-        specifier_types: get_patterns(matches, "specifier-types"),
+        source_mode: get_source_mode(matches),
         subcommand,
         target: get_target(matches),
-      })
-    }
-
-    fn create_default_cli(subcommand: Subcommand) -> Result<Cli, Box<dyn std::error::Error>> {
-      Ok(Cli {
-        check: false,
-        config_path: None,
-        cwd: env::current_dir().map_err(|e| Box::new(CliError::CurrentDirFailed(e.to_string())))?,
-        dependencies: vec![],
-        dependency_types: vec![],
-        disable_ansi: false,
-        dry_run: false,
-        log_levels: vec![],
-        packages: vec![],
-        show_hints: false,
-        show_ignored: false,
-        show_instances: false,
-        show_status_codes: false,
-        sort: SortBy::Name,
-        source_patterns: vec![],
-        specifier_types: vec![],
-        subcommand,
-        target: UpdateTarget::Latest,
-      })
-    }
-
-    match create().get_matches().subcommand() {
-      Some(("lint", matches)) => from_arg_matches(Subcommand::Lint, matches),
-      Some(("fix", matches)) => from_arg_matches(Subcommand::Fix, matches),
-      Some(("format", matches)) => from_arg_matches(Subcommand::Format, matches),
-      Some(("update", matches)) => from_arg_matches(Subcommand::Update, matches),
-      Some(("list", matches)) => from_arg_matches(Subcommand::List, matches),
-      Some(("json", matches)) => from_arg_matches(Subcommand::Json, matches),
-      Some(("list-mismatches", _)) => create_default_cli(Subcommand::ListMismatches),
-      Some(("lint-semver-ranges", _)) => create_default_cli(Subcommand::LintSemverRanges),
-      Some(("fix-mismatches", _)) => create_default_cli(Subcommand::FixMismatches),
-      Some(("set-semver-ranges", _)) => create_default_cli(Subcommand::SetSemverRanges),
-      Some(("prompt", _)) => create_default_cli(Subcommand::Prompt),
-      _ => {
-        std::process::exit(1);
       }
     }
-  }
 
-  /// Create a `GroupSelector` struct based on the provided command line options
-  /// which relate to filtering of packages and dependencies.
-  ///
-  /// `GroupSelector` is the same struct as used by `VersionGroup` and
-  /// `SemverGroup` and this CLI `GroupSelector`, when configured, serves as a
-  /// single `VersionGroup` which overrides all those set in config.
-  pub fn get_filters(&self, packages: &Packages, all_dependency_types: &[DependencyType]) -> Option<GroupSelector> {
-    if self.dependencies.is_empty() && self.dependency_types.is_empty() && self.packages.is_empty() && self.specifier_types.is_empty() {
-      None
-    } else {
-      Some(GroupSelector::new(
-        /* all_packages: */ packages,
-        /* include_dependencies: */ self.dependencies.clone(),
-        /* include_dependency_types: */ self.dependency_types.clone(),
-        /* alias_name: */ "CLI filters".to_string(),
-        /* include_packages: */ self.packages.clone(),
-        /* include_specifier_types: */ self.specifier_types.clone(),
-        /* all_dependency_types: */ all_dependency_types,
-      ))
+    fn from_deprecated(subcommand: Subcommand) -> Cli {
+      Cli {
+        subcommand,
+        ..Default::default()
+      }
     }
+
+    create()
+      .try_get_matches_from(args)
+      .map_err(SynopkgError::CliError)
+      .and_then(|matches| {
+        matches
+          .subcommand()
+          .and_then(|subcommand| match subcommand {
+            ("fix", matches) => Some(from_arg_matches(Subcommand::Fix, matches)),
+            ("fix-mismatches", _) => Some(from_deprecated(Subcommand::FixMismatches)),
+            ("format", matches) => Some(from_arg_matches(Subcommand::Format, matches)),
+            ("json", matches) => Some(from_arg_matches(Subcommand::Json, matches)),
+            ("lint", matches) => Some(from_arg_matches(Subcommand::Lint, matches)),
+            ("lint-semver-ranges", _) => Some(from_deprecated(Subcommand::LintSemverRanges)),
+            ("list", matches) => Some(from_arg_matches(Subcommand::List, matches)),
+            ("list-mismatches", _) => Some(from_deprecated(Subcommand::ListMismatches)),
+            ("prompt", _) => Some(from_deprecated(Subcommand::Prompt)),
+            ("set-semver-ranges", _) => Some(from_deprecated(Subcommand::SetSemverRanges)),
+            ("update", matches) => Some(from_arg_matches(Subcommand::Update, matches)),
+            _ => None,
+          })
+          .ok_or(SynopkgError::NoSubcommand)
+      })
   }
 }
 
@@ -203,6 +215,7 @@ fn create() -> Command {
         .arg(show_option_versions("lint"))
         .arg(sort_option("lint"))
         .arg(source_option("lint"))
+        .arg(source_mode_option("lint"))
         .arg(specifier_types_option("lint")),
     )
     .subcommand(
@@ -215,9 +228,11 @@ fn create() -> Command {
         .arg(dry_run_option("fix"))
         .arg(log_levels_option("fix"))
         .arg(no_ansi_option("fix"))
+        .arg(reporter_option("fix"))
         .arg(show_option_versions("fix"))
         .arg(sort_option("fix"))
         .arg(source_option("fix"))
+        .arg(source_mode_option("fix"))
         .arg(specifier_types_option("fix")),
     )
     .subcommand(
@@ -234,7 +249,9 @@ fn create() -> Command {
         .arg(dry_run_option("format"))
         .arg(log_levels_option("format"))
         .arg(no_ansi_option("format"))
-        .arg(source_option("format")),
+        .arg(reporter_option("format"))
+        .arg(source_option("format"))
+        .arg(source_mode_option("format")),
     )
     .subcommand(
       Command::new("update")
@@ -244,6 +261,35 @@ fn create() -> Command {
           Arg::new("check")
             .long("check")
             .long_help(cformat!(r#"Check versions are up to date instead of updating them"#))
+            .conflicts_with("interactive")
+            .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+          Arg::new("no-cache")
+            .long("no-cache")
+            .long_help(cformat!(
+              r#"Bypass the on-disk cache of npm registry responses
+
+By default Synopkg caches registry responses in the system temp
+directory for 30 minutes to avoid repeat network calls. Pass this flag
+to skip both reading and writing the cache."#
+            ))
+            .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+          Arg::new("interactive")
+            .long("interactive")
+            .short('i')
+            .long_help(cformat!(
+              r#"Pick which updates to apply through an interactive prompt.
+
+<bold><underline>Keys:</underline></bold>
+<blue>↑↓</>          navigate
+<blue>space</>       toggle
+<blue>a</>           toggle all
+<blue>enter</>       confirm and write
+<blue>esc</>         cancel without writing"#
+            ))
             .action(clap::ArgAction::SetTrue),
         )
         .arg(config_option("update"))
@@ -253,6 +299,7 @@ fn create() -> Command {
         .arg(log_levels_option("update"))
         .arg(no_ansi_option("update"))
         .arg(source_option("update"))
+        .arg(source_mode_option("update"))
         .arg(specifier_types_option("update"))
         .arg(target_option("update")),
     )
@@ -268,6 +315,7 @@ fn create() -> Command {
         .arg(show_option_list("list"))
         .arg(sort_option("list"))
         .arg(source_option("list"))
+        .arg(source_mode_option("list"))
         .arg(specifier_types_option("list")),
     )
     .subcommand(
@@ -281,6 +329,7 @@ fn create() -> Command {
         .arg(no_ansi_option("json"))
         .arg(sort_option("json"))
         .arg(source_option("json"))
+        .arg(source_mode_option("json"))
         .arg(specifier_types_option("json")),
     )
     .subcommand(
@@ -321,9 +370,31 @@ fn create() -> Command {
 }
 
 fn config_option(_command: &str) -> Arg {
-  Arg::new("config").long("config").value_name("PATH").long_help(cformat!(
-    r#"Path to a specific config file to use. When set, config file discovery is skipped."#
-  ))
+  Arg::new("config")
+    .long("config")
+    .value_name("PATH")
+    .value_parser(ValueParser::new(parse_config_path))
+    .long_help(cformat!(
+      r#"Path to a specific config file to use. When set, config file discovery is skipped."#
+    ))
+}
+
+fn parse_config_path(raw: &str) -> Result<PathBuf, String> {
+  let path = PathBuf::from(raw);
+  let resolved = if path.is_absolute() {
+    path.clone()
+  } else {
+    env::current_dir()
+      .map_err(|e| format!("could not resolve current directory: {e}"))?
+      .join(&path)
+  };
+  if !resolved.exists() {
+    return Err(format!("file not found: {}", path.display()));
+  }
+  if !resolved.is_file() {
+    return Err(format!("not a file: {}", path.display()));
+  }
+  Ok(path)
 }
 
 fn dependencies_option(command: &str) -> Arg {
@@ -512,7 +583,7 @@ fn dependency_types_option(command: &str) -> Arg {
 <blue>local</>          version
 <blue>overrides</>      overrides
 <blue>peer</>           peerDependencies
-<blue>pnpmOverrides</>  pnpm.overrides
+<blue>pnpmOverrides</>  overrides (in pnpm-workspace.yaml)
 <blue>prod</>           dependencies
 <blue>resolutions</>    resolutions
 
@@ -527,6 +598,23 @@ See <blue>https://envrs.github.io/synopkg/config/custom-types/</>
     ))
     .value_delimiter(',')
     .value_name("comma-separated-dependency-type-names")
+}
+
+fn reporter_option(command: &str) -> Arg {
+  let short_help = "Set the output format for the command";
+  Arg::new("reporter")
+    .long("reporter")
+    .help(short_help)
+    .long_help(cformat!(
+      r#"{short_help}
+
+<bold><underline>Examples:</underline></bold>
+<dim>Output as newline-delimited JSON</dim>
+<dim>$</dim> <blue><bold>synopkg {command}</bold> --reporter json</>"#
+    ))
+    .value_parser(["pretty", "json"])
+    .value_name("reporter-name")
+    .default_value("pretty")
 }
 
 fn dry_run_option(command: &str) -> Arg {
@@ -599,11 +687,36 @@ Patterns are discovered in the following order, first one wins:
 4. <blue>.workspaces</> property of package.json (npm and yarn)
 5. <blue>.packages</> property of pnpm-workspace.yaml
 6. <blue>.packages</> property of lerna.json
-7. Default to <blue>["package.json","packages/*/package.json"]</>"#
+7. Default to <blue>["package.json","packages/*/package.json"]</>
+
+Pass <blue>--source-mode extend</> to *append* your patterns to the discovered
+ones instead of replacing them."#
     ))
     .action(clap::ArgAction::Append)
     .value_parser(ValueParser::new(validate_source))
     .value_name("file-pattern")
+}
+
+fn source_mode_option(command: &str) -> Arg {
+  let short_help = "How --source patterns combine with workspace discovery";
+  Arg::new("source-mode")
+    .long("source-mode")
+    .help(short_help)
+    .long_help(cformat!(
+      r#"{short_help}
+
+<bold><underline>Values:</underline></bold>
+- <blue>replace</> (default): your <blue>--source</> patterns replace workspace
+  discovery entirely.
+- <blue>extend</>: your <blue>--source</> patterns are appended to the
+  discovered patterns (npm/yarn/pnpm/lerna).
+
+<bold><underline>Example:</underline></bold>
+<dim>$</dim> <blue><bold>synopkg {command}</bold> --source-mode extend --source 'extra/package.json'</>"#
+    ))
+    .action(clap::ArgAction::Set)
+    .value_parser(["replace", "extend"])
+    .value_name("mode")
 }
 
 fn target_option(command: &str) -> Arg {
@@ -636,10 +749,10 @@ fn additional_help() -> String {
 }
 
 fn validate_source(value: &str) -> Result<String, String> {
-  if value.ends_with("package.json") {
+  if value.ends_with(".json") {
     Ok(value.to_string())
   } else {
-    Err("must end with 'package.json'".to_string())
+    Err("must end with '.json'".to_string())
   }
 }
 
@@ -663,6 +776,25 @@ fn get_patterns(matches: &ArgMatches, option_name: &str) -> Vec<String> {
     .flatten()
     .map(|source| source.into_iter().map(|source| source.to_owned()).collect_vec())
     .unwrap_or_default()
+}
+
+fn get_source_mode(matches: &ArgMatches) -> Option<SourceMode> {
+  matches
+    .try_get_one::<String>("source-mode")
+    .ok()
+    .flatten()
+    .and_then(|value| SourceMode::from_str(value).ok())
+}
+
+fn get_reporter(subcommand: &Subcommand, matches: &ArgMatches) -> ReporterKind {
+  if matches!(subcommand, Subcommand::Fix | Subcommand::Format) {
+    match matches.get_one::<String>("reporter").map(|s| s.as_str()) {
+      Some("json") => ReporterKind::Json,
+      _ => ReporterKind::Pretty,
+    }
+  } else {
+    ReporterKind::Pretty
+  }
 }
 
 fn get_target(matches: &ArgMatches) -> UpdateTarget {

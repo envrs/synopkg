@@ -1,11 +1,9 @@
 ---
 title: Migrate to 14
 description: Migration guide for upgrading from synopkg v13 to v14 with breaking changes and new features
-sidebar:
-  badge: New
 ---
 
-```bash
+```bash frame="none"
 npm install --save-dev synopkg
 ```
 
@@ -13,9 +11,9 @@ npm install --save-dev synopkg
 
 ### `list-mismatches` → `lint`
 
-`list-mismatches` and `lint-semver-ranges` have been merged into a single `lint` command which checks whether every specifier matches the semver group and version group they belong to. The `lint` command no longer checks formatting, which is now handled by `synopkg format ––check`.
+`list-mismatches` and `lint-semver-ranges` have been merged into a single `lint` command which checks whether every specifier matches the semver group and version group they belong to. The `lint` command no longer checks formatting, which is now handled by `synopkg format --check`.
 
-```bash
+```bash frame="none"
 # v13
 synopkg list-mismatches --types prod,dev
 # v14
@@ -24,9 +22,9 @@ synopkg lint --dependency-types prod,dev
 
 ### `lint-semver-ranges` → `lint`
 
-`list-mismatches` and `lint-semver-ranges` have been merged into a single `lint` command which checks whether every specifier matches the semver group and version group they belong to. The `lint` command no longer checks formatting, which is now handled by `synopkg format ––check`. It's no longer possible to manage semver ranges without also checking version mismatches, because the two things are so closely linked. Changes to semver ranges affect which versions are considered valid and can indirectly cause version mismatches, so they are now always checked and changed together via the `lint` and `fix` commands.
+`list-mismatches` and `lint-semver-ranges` have been merged into a single `lint` command which checks whether every specifier matches the semver group and version group they belong to. The `lint` command no longer checks formatting, which is now handled by `synopkg format --check`. It's no longer possible to manage semver ranges without also checking version mismatches, because the two things are so closely linked. Changes to semver ranges affect which versions are considered valid and can indirectly cause version mismatches, so they are now always checked and changed together via the `lint` and `fix` commands.
 
-```bash
+```bash frame="none"
 # v13
 synopkg lint-semver-ranges
 # v14
@@ -37,7 +35,7 @@ synopkg lint
 
 `fix-mismatches` and `set-semver-ranges` have been merged into a single `fix` command which autofixes issue found by `synopkg lint`. The `fix` command no longer fixes formatting, which is now handled by `synopkg format`.
 
-```bash
+```bash frame="none"
 # v13
 synopkg fix-mismatches
 # v14
@@ -48,7 +46,7 @@ synopkg fix
 
 `fix-mismatches` and `set-semver-ranges` have been merged into a single `fix` command which autofixes issue found by `synopkg lint`. The `fix` command no longer fixes formatting, which is now handled by `synopkg format`. It's no longer possible to manage semver ranges without also checking version mismatches, because the two things are so closely linked. Changes to semver ranges affect which versions are considered valid and can indirectly cause version mismatches, so they are now always checked and changed together via the `lint` and `fix` commands.
 
-```bash
+```bash frame="none"
 # v13
 synopkg set-semver-ranges
 # v14
@@ -59,7 +57,7 @@ synopkg fix
 
 The `prompt` command is an interactive prompt which lists all current issues which synopkg can't fix automatically. It is not yet available in v14 and will be added at a later date. Synopkg can't automatically fix mismatches between specifiers it does not support, which are usually specifiers which are not semver, such as pnpm overrides, or complex semver specifiers like `^1.2.3 || ^2.0.0`.
 
-```bash
+```bash frame="none"
 # v13
 synopkg prompt
 # v14
@@ -72,7 +70,7 @@ synopkg prompt
 
 Renamed for consistency and also to differentiate it from other types such as specifier types.
 
-```bash
+```bash frame="none"
 # v13
 synopkg list-mismatches --types prod,dev
 # v14
@@ -83,7 +81,7 @@ synopkg lint --dependency-types prod,dev
 
 Renamed for consistency.
 
-```bash
+```bash frame="none"
 # v13
 synopkg format --specs exact,range
 # v14
@@ -94,7 +92,7 @@ synopkg format --specifier-types exact,range
 
 This has been renamed to `dependencies` to match the equivalent property of version groups and semver groups. Regular expressions are no longer supported and instead a glob pattern should be provided in the same way as they are for version groups and semver groups.
 
-```bash
+```bash frame="none"
 # v13
 synopkg list-mismatches --filter "^@types\/.+"
 # v14
@@ -124,7 +122,7 @@ The `dependencyTypes` config has been removed in favour of using `versionGroups`
 
 Or use the `--dependency-types` CLI option to filter on an ad hoc basis:
 
-```bash
+```bash frame="none"
 synopkg lint --dependency-types prod,dev,peer
 ```
 
@@ -149,7 +147,7 @@ The `specifierTypes` config has been removed in favour of using `versionGroups` 
 
 Or use the `--specifier-types` CLI option to filter on an ad hoc basis:
 
-```bash
+```bash frame="none"
 synopkg format --specifier-types exact,range
 ```
 
@@ -166,7 +164,7 @@ The `lint` command no longer checks formatting, only version mismatches, so the 
 }
 ```
 
-```bash
+```bash frame="none"
 # Check if formatting needed (exit 1 if needed)
 synopkg format --check
 # Safely see what formatting fixes would look like
@@ -209,7 +207,7 @@ This option is redundant in V14.
 
 The `workspace` dependency type has been renamed to `local` for clarity.
 
-```bash
+```bash frame="none"
 # v11.2.0 and earlier
 synopkg list --types prod,workspace
 # v14
@@ -222,7 +220,7 @@ synopkg lint --dependency-types prod,local
 
 Individual boolean flags replaced with `--dependency-types` option:
 
-```bash
+```bash frame="none"
 # v8
 synopkg list --prod --dev --peer
 # v14
@@ -272,7 +270,7 @@ Individual boolean properties replaced with `versionGroups` configuration:
 
 The `--overrides` option now refers to npm overrides. pnpm users must use `--pnpmOverrides` instead.
 
-```bash
+```bash frame="none"
 # v7 (pnpm users)
 synopkg list --overrides
 # v14 (pnpm users)
@@ -305,7 +303,7 @@ In v14, disable this behavior using `versionGroups`:
 
 Or exclude `local` when using CLI flags:
 
-```bash
+```bash frame="none"
 # v14
 synopkg lint --dependency-types '!local'
 ```
@@ -332,7 +330,7 @@ In v14, exclude them using `versionGroups`:
 
 Or via CLI:
 
-```bash
+```bash frame="none"
 # v14
 synopkg lint --dependency-types dev,peer,prod
 ```
@@ -343,7 +341,7 @@ synopkg lint --dependency-types dev,peer,prod
 
 Package locations now specified with repeatable `--source` option instead of positional arguments:
 
-```bash
+```bash frame="none"
 # v2
 synopkg list './package.json' './packages/*/package.json'
 # v14
