@@ -6,7 +6,7 @@ sidebar:
   label: Getting Started
 ---
 
-Synopkg is a command-line tool for consistent dependency versions in large JavaScript Monorepos, it is used by [AWS](https://github.com/aws/aws-pdk), [Cloudflare](https://github.com/cloudflare/mcp-server-cloudflare), [DataDog](https://github.com/DataDog/datadog-ci), [Electron](https://github.com/electron/forge), [GoDaddy](https://github.com/godaddy/gasket), [LiveStore](https://github.com/livestorejs/livestore), [Lottie](https://github.com/LottieFiles/dotlottie-web), [Microsoft](https://github.com/microsoft/fluentui), [PostHog](https://github.com/PostHog/posthog), [Qwik](https://github.com/QwikDev/qwik), [Raycast](https://github.com/raycast/extensions), [Salesforce](https://github.com/SalesforceCommerceCloud/pwa-kit), [TopTal](https://github.com/toptal/picasso), [Vercel](https://github.com/vercel/vercel), [VoltAgent](https://github.com/VoltAgent/voltagent), [WooCommerce](https://github.com/woocommerce/woocommerce) and others.
+Synopkg is a command-line tool for consistent dependency versions in large JavaScript Monorepos, it is used by [AWS](https://github.com/aws/aws-pdk), [Cloudflare](https://github.com/cloudflare/mcp-server-cloudflare), [DataDog](https://github.com/DataDog/datadog-ci), [Electron](https://github.com/electron/forge), [GoDaddy](https://github.com/godaddy/gasket), [Lottie](https://github.com/LottieFiles/dotlottie-web), [Microsoft](https://github.com/microsoft/fluentui), [PostHog](https://github.com/PostHog/posthog), [Qwik](https://github.com/QwikDev/qwik), [Raycast](https://github.com/raycast/extensions), [Salesforce](https://github.com/SalesforceCommerceCloud/pwa-kit), [TopTal](https://github.com/toptal/picasso), [Vercel](https://github.com/vercel/vercel), [VoltAgent](https://github.com/VoltAgent/voltagent), [WooCommerce](https://github.com/woocommerce/woocommerce) and others.
 
 Some of the things it can do are:
 
@@ -15,15 +15,17 @@ Some of the things it can do are:
 - Find and bump outdated versions from the npm registry.
 - Ensure some dependencies always remain pinned at a specific version.
 - Ban some dependencies from being used: anywhere, or in specific places.
-- Define rules for where exact or loose semver ranges should be used.
+- Define rules for where exact or loose semver ranges should be used, including in catalogs.
 - Assign packages as the source of truth for specific dependencies' versions.
 - Sort and format package.json files consistently.
+- Auto-migrate all or parts of your repo to [pnpm catalogs](https://pnpm.io/catalogs) or [bun catalogs](https://bun.sh/docs/pm/catalogs).
+- Bump outdated versions in catalogs.
 
 ## Try it
 
 The fastest way to try synopkg is via [npx](HREF_NPX).
 
-```bash
+```bash frame="none"
 npx synopkg list --dependency-types prod
 ```
 
@@ -33,13 +35,13 @@ Synopkg uses your package manager's workspace configuration to locate your packa
 
 For any given command, browse a summary of its options with `-h`
 
-```bash
+```bash frame="none"
 npx synopkg update -h
 ```
 
 or display documentation and examples with `--help`
 
-```bash
+```bash frame="none"
 npx synopkg update --help
 ```
 
@@ -47,13 +49,13 @@ npx synopkg update --help
 
 When setting up a project for real, install `synopkg` in [`devDependencies`](HREF_DEV_DEPENDENCIES) so that everyone working on your project uses the same version.
 
-```bash
+```bash frame="none"
 npm install synopkg --save-dev
 ```
 
 The locally installed binary can be run using [npm exec](HREF_NPM_EXEC)
 
-```bash
+```bash frame="none"
 npm exec synopkg -- list
 ```
 
@@ -65,7 +67,7 @@ The examples below assume synopkg is installed globally. Replace `synopkg` with 
 
 Let's see which dependencies we use the most.
 
-```bash
+```bash frame="none"
 synopkg list --dependency-types prod --sort count
 ```
 
@@ -73,13 +75,13 @@ Some of our dependencies might have [status codes](REF_STATUS_CODES) next to the
 
 To focus only on dependencies with errors, use `lint` instead of `list`.
 
-```bash
+```bash frame="none"
 synopkg lint --dependency-types prod
 ```
 
 If the suggested changes look ok, we can autofix them.
 
-```bash
+```bash frame="none"
 synopkg fix --dependency-types prod
 ```
 
@@ -89,49 +91,49 @@ After running `fix` or `update`, run your package manager (`npm install`, `pnpm 
 
 Or we could choose to only autofix one of them, for this example I've chosen `react`.
 
-```bash
+```bash frame="none"
 synopkg fix --dependency-types prod --dependencies react
 ```
 
 All of synopkg's commands can be filtered in the same way, let's see if `react` needs updating.
 
-```bash
+```bash frame="none"
 synopkg update --check --dependencies react
 ```
 
 Or list every dependency with `eslint` somewhere in the name.
 
-```bash
+```bash frame="none"
 synopkg list --dependencies '**eslint**'
 ```
 
 Or every dependency published under the `@types` scope.
 
-```bash
+```bash frame="none"
 synopkg list --dependencies '@types/**'
 ```
 
 We can find every dependency installed with an exact version number.
 
-```bash
+```bash frame="none"
 synopkg list --specifier-types exact
 ```
 
 Or look for updates to [`devDependencies`](HREF_DEV_DEPENDENCIES) where only the patch version is newer than what we have installed.
 
-```bash
+```bash frame="none"
 synopkg update --check --dependency-types dev --target patch
 ```
 
 And by removing the `--check` option we can write the newer versions to our files.
 
-```bash
+```bash frame="none"
 synopkg update --dependencies react
 ```
 
 Each command supports `--help` for examples and available options.
 
-```bash
+```bash frame="none"
 synopkg list --help
 ```
 
@@ -139,7 +141,7 @@ synopkg list --help
 
 Create a [.synopkgrc](CONFIG_SYNOPKGRC) file in the root of your repo to customise behaviour. One way to get started is to focus on production dependencies, then gradually broaden out as you feel comfortable. This is done using [`Version Groups`](CONFIG_VERSION_GROUPS).
 
-```json
+```json title=".synopkgrc.json"
 {
   "versionGroups": [
     {
@@ -156,7 +158,7 @@ Create a [.synopkgrc](CONFIG_SYNOPKGRC) file in the root of your repo to customi
 
 Or you could focus on specific dependencies and fix those first:
 
-```json
+```json title=".synopkgrc.json"
 {
   "versionGroups": [
     {
@@ -176,7 +178,7 @@ Or you could focus on specific dependencies and fix those first:
 
 This is a popular configuration which ensures that `workspace:*` is always used when you depend on a package which is developed in your monorepo.
 
-```json
+```json title=".synopkgrc.json"
 {
   "versionGroups": [
     {

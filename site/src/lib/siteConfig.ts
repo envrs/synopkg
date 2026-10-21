@@ -12,7 +12,7 @@ export const siteConfig = {
   logoUrl: 'https://envrs.github.io/synopkg/logo.svg',
   npmUrl: 'https://www.npmjs.com/package/synopkg',
   githubUrl: 'https://github.com/envrs/synopkg',
-  authorName: 'Md Sulaiman',
+  authorName: 'Jamie Mason',
   authorUrl: 'https://github.com/envrs',
   authorImage: 'https://avatars.githubusercontent.com/u/320492?v=4',
   authorSocial: [

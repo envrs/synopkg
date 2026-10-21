@@ -10,14 +10,16 @@ import DryRunOption from "@partials/option/dry-run.mdx";
 import HelpOption from "@partials/option/help.mdx";
 import LogLevelsOption from "@partials/option/log-levels.mdx";
 import NoAnsiOption from "@partials/option/no-ansi.mdx";
+import ReporterOption from "@partials/option/reporter-format.mdx";
 import QuoteFilters from "@partials/tips/quote-filters.mdx";
 import SourceOption from "@partials/option/source.mdx";
+import SourceModeOption from "@partials/option/source-mode.mdx";
 
-Format package.json files in your monorepo. Sorts fields into consistent order and alphabetises nested fields. Use this to maintain readable, diff-friendly package.json files. Does not change version numbers—use `fix` for that.
+Format package.json files in your monorepo. Sorts fields into consistent order and alphabetises nested fields. Use this to maintain readable, diff-friendly package.json files. Does not change version numbers. Use `fix` for that.
 
 ## Examples
 
-```bash
+```bash frame="none"
 # Fix every formatting issue in the monorepo
 synopkg format
 # List all formatting issues in the monorepo
@@ -57,9 +59,17 @@ synopkg format -h
 
 <NoAnsiOption command="format" />
 
+### --reporter <Badge text="<reporter-name>" />
+
+<ReporterOption command="format" />
+
 ### --source <Badge text="<file-pattern>" />
 
 <SourceOption command="format" />
+
+### --source-mode <Badge text="<replace|extend>" />
+
+<SourceModeOption command="format" />
 
 ### --help
 

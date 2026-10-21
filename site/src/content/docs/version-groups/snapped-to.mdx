@@ -1,6 +1,6 @@
 ---
 title: Snapped To
-description: Synchronize dependency versions to match those defined in a specific source package
+description: Synchronise dependency versions to match those defined in a specific source package
 ---
 
 import { Badge } from "@astrojs/starlight/components";
@@ -9,9 +9,12 @@ import Dependencies from "@partials/group-config/dependencies.mdx";
 import DependencyTypes from "@partials/group-config/dependency-types.mdx";
 import SpecifierTypes from "@partials/group-config/specifier-types.mdx";
 import Label from "@partials/group-config/label.mdx";
+import SeverityGroupSection from "@partials/severity/group-section.mdx";
 import Details from "@site/components/details.astro";
 
-Pin the version of all dependencies in this group to follow the versions used by the other packages named within the `snapTo` array.
+Synchronise versions by following a source package. Every dependency in this group will use the same version as defined in the packages you've designated via the `snapTo` array.
+
+This is useful when certain packages within your monorepo are the source of truth for dependency versions. For example, if your main application package has been carefully tested with specific versions, you want all other packages to follow those same versions to ensure consistency and reduce the variables in your system.
 
 ## Configuration
 
@@ -50,3 +53,47 @@ Pin the version of all dependencies in this group to follow the versions used by
 ### packages <Badge text="Optional" variant="note" />
 
 <Packages />
+
+### severity <Badge text="Optional" variant="note" />
+
+<SeverityGroupSection group="snappedTo">
+
+```json title=".synopkgrc.json"
+{
+  "versionGroups": [
+    {
+      "dependencies": ["react", "react-native"],
+      "snapTo": ["mobile-app"],
+      "severity": {
+        "DiffersToSnapTarget": "error",
+        "RefuseToSnapLocal": "fix"
+      }
+    }
+  ]
+}
+```
+
+</SeverityGroupSection>
+
+## Status Codes
+
+These are all the issues that a {frontmatter.title} Version Group can find:
+
+### Valid
+
+- [IsIdenticalToSnapTarget](STATUS_IS_IDENTICAL_TO_SNAP_TARGET)
+- [SatisfiesSnapTarget](STATUS_SATISFIES_SNAP_TARGET)
+
+### Fixable
+
+- [DiffersToSnapTarget](STATUS_DIFFERS_TO_SNAP_TARGET)
+
+### Suspect
+
+- [RefuseToSnapLocal](STATUS_REFUSE_TO_SNAP_LOCAL)
+- [DependsOnMissingSnapTarget](STATUS_DEPENDS_ON_MISSING_SNAP_TARGET)
+
+### Conflict
+
+- [MatchConflictsWithSnapTarget](STATUS_MATCH_CONFLICTS_WITH_SNAP_TARGET)
+- [MismatchConflictsWithSnapTarget](STATUS_MISMATCH_CONFLICTS_WITH_SNAP_TARGET)

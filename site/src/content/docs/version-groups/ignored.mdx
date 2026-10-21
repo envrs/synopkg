@@ -11,7 +11,9 @@ import SpecifierTypes from "@partials/group-config/specifier-types.mdx";
 import Label from "@partials/group-config/label.mdx";
 import Details from "@site/components/details.astro";
 
-Have synopkg ignore the versions of these dependencies completely.
+Have synopkg ignore these dependencies completely.
+
+Defining version groups for dependencies you know you can easily fix, followed by a catch-all Ignored Version Group as the last member of your `versionGroups` array is a good way to incrementally adopt synopkg.
 
 ## Configuration
 
@@ -49,3 +51,15 @@ This property activates this behaviour for a given Version Group.
 ### packages <Badge text="Optional" variant="note" />
 
 <Packages />
+
+### severity
+
+An Ignored group emits no statuses to tune. A `severity` map written here is accepted and silently discarded. Set [`isIgnored`](#isignored) to `false` and pick a different group type if you want to control how issues are reported.
+
+## Status Codes
+
+These are all the issues that a {frontmatter.title} Version Group can find:
+
+### Valid
+
+- [IsIgnored](STATUS_IS_IGNORED)

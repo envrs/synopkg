@@ -1,6 +1,6 @@
 ---
 title: Lowest Semver
-description: Keep all dependencies synchronized to the lowest semver version found across your monorepo
+description: Keep all dependencies synchronised to the lowest semver version found across your monorepo
 ---
 
 import { Badge } from "@astrojs/starlight/components";
@@ -9,8 +9,9 @@ import Dependencies from "@partials/group-config/dependencies.mdx";
 import DependencyTypes from "@partials/group-config/dependency-types.mdx";
 import SpecifierTypes from "@partials/group-config/specifier-types.mdx";
 import Label from "@partials/group-config/label.mdx";
+import SeverityGroupSection from "@partials/severity/group-section.mdx";
 
-Fix mismatched versions in this group by choosing the lowest/oldest semver version in use.
+Require all dependencies in this group to use the lowest semver version found of all the instances where it is already installed in your monorepo. When versions differ, synopkg will align them to the lowest one installed.
 
 ## Examples
 
@@ -50,3 +51,43 @@ Must be set to `lowestSemver`.
 ### packages <Badge text="Optional" variant="note" />
 
 <Packages />
+
+### severity <Badge text="Optional" variant="note" />
+
+<SeverityGroupSection group="lowestSemver">
+
+```json title=".synopkgrc.json"
+{
+  "versionGroups": [
+    {
+      "dependencies": ["swing", "low"],
+      "preferVersion": "lowestSemver",
+      "severity": {
+        "DiffersToHighestOrLowestSemver": "warn"
+      }
+    }
+  ]
+}
+```
+
+</SeverityGroupSection>
+
+`DiffersToNpmRegistry` is **not** configurable via `severity`. Registry-update behaviour is controlled by [`updateGroups`](CONFIG_UPDATE_GROUPS).
+
+## Status Codes
+
+These are all the issues that a {frontmatter.title} Version Group can find:
+
+### Valid
+
+- [IsHighestOrLowestSemver](STATUS_IS_HIGHEST_OR_LOWEST_SEMVER)
+- [SatisfiesHighestOrLowestSemver](STATUS_SATISFIES_HIGHEST_OR_LOWEST_SEMVER)
+
+### Fixable
+
+- [DiffersToHighestOrLowestSemver](STATUS_DIFFERS_TO_HIGHEST_OR_LOWEST_SEMVER)
+
+### Conflict
+
+- [MatchConflictsWithHighestOrLowestSemver](STATUS_MATCH_CONFLICTS_WITH_HIGHEST_OR_LOWEST_SEMVER)
+- [MismatchConflictsWithHighestOrLowestSemver](STATUS_MISMATCH_CONFLICTS_WITH_HIGHEST_OR_LOWEST_SEMVER)

@@ -42,7 +42,7 @@ function buildWebSiteSchema() {
 }
 
 /**
- * Person schema for homepage (Md Sulaiman as author).
+ * Person schema for homepage (Jamie Mason as author).
  * https://schema.org/Person
  */
 function buildPersonSchema() {
@@ -84,7 +84,7 @@ function buildSoftwareApplicationSchema() {
  * https://schema.org/BreadcrumbList
  */
 function buildBreadcrumbSchema(route: StarlightRouteData) {
-  const breadcrumbs = generateBreadcrumbs(route.slug);
+  const breadcrumbs = generateBreadcrumbs(route.id);
 
   return {
     '@context': 'https://schema.org',

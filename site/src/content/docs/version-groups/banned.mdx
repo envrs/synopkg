@@ -8,10 +8,11 @@ import DependencyTypes from "@partials/group-config/dependency-types.mdx";
 import SpecifierTypes from "@partials/group-config/specifier-types.mdx";
 import Label from "@partials/group-config/label.mdx";
 import Packages from "@partials/group-config/packages.mdx";
+import SeverityGroupSection from "@partials/severity/group-section.mdx";
 import { Badge } from "@astrojs/starlight/components";
 import Details from "@site/components/details.astro";
 
-Find and remove dependencies which you've decided should never be used.
+Prevent dependencies from being used anywhere in your monorepo, or only in specific packages. Common cases are blocking legacy packages, conflicting libraries, or packages that violate your security or licensing policy. When synopkg finds a banned dependency, it flags it as an issue that must be removed.
 
 ## Configuration
 
@@ -49,3 +50,35 @@ This property activates this behaviour for a given Version Group.
 ### packages <Badge text="Optional" variant="note" />
 
 <Packages />
+
+### severity <Badge text="Optional" variant="note" />
+
+<SeverityGroupSection group="banned">
+
+```json title=".synopkgrc.json"
+{
+  "versionGroups": [
+    {
+      "dependencies": ["never-gonna"],
+      "isBanned": true,
+      "severity": {
+        "IsBanned": "error"
+      }
+    }
+  ]
+}
+```
+
+</SeverityGroupSection>
+
+## Status Codes
+
+These are all the issues that a {frontmatter.title} Version Group can find:
+
+### Fixable
+
+- [IsBanned](STATUS_IS_BANNED)
+
+### Suspect
+
+- [RefuseToBanLocal](STATUS_REFUSE_TO_BAN_LOCAL)
