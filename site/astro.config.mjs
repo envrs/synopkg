@@ -151,7 +151,7 @@ export default defineConfig({
           tag: 'script',
           attrs: {
             async: true,
-            src: 'https://www.googletagmanager.com/gtag/js?id=G-DXPH5LLJ0N',
+            src: 'https://www.googletagmanager.com/gtag/js?id=GTM-WW38HZHG',
           },
         },
         {
@@ -160,7 +160,7 @@ export default defineConfig({
             'window.dataLayer=window.dataLayer||[];',
             'function gtag(){dataLayer.push(arguments);}',
             `gtag('js', new Date());`,
-            `gtag('config', 'G-DXPH5LLJ0N');`,
+            `gtag('config', 'GTM-WW38HZHG');`,
           ].join(''),
         },
       ],
