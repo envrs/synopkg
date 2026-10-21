@@ -1,7 +1,7 @@
 {
   "name": "synopkg-issue",
   "devDependencies": {
-    "synopkg": "14.0.0-alpha.1"
+    "synopkg": "alpha"
   },
   "packageManager": "pnpm@10.26.0"
 }
