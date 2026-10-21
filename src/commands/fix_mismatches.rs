@@ -30,7 +30,12 @@ pub fn run(_ctx: Context) -> Result<Context, SynopkgError> {
   eprintln!("  {}", "# v14".dimmed());
   eprintln!("  {}", "synopkg fix".cyan());
   eprintln!();
-  eprintln!("{}", "https://envrs.github.io/synopkg/guide/migrate-v14#fix-mismatches-fix".blue().underline());
+  eprintln!(
+    "{}",
+    "https://envrs.github.io/synopkg/guide/migrate-v14#fix-mismatches-fix"
+      .blue()
+      .underline()
+  );
   eprintln!();
   Err(SynopkgError::DeprecatedCommand)
 }

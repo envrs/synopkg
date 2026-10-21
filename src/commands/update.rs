@@ -215,9 +215,7 @@ pub fn run<D: DiskIo>(mut ctx: Context, registry_updates: RegistryUpdates, io: &
     registry_updates.failed.iter().for_each(|name| {
       error!("Failed to fetch {name}");
     });
-    warn!(
-      "Synopkg does not yet support custom npm registries{LINE_ENDING}  Subscribe to https://github.com/envrs/synopkg/issues/220"
-    );
+    warn!("Synopkg does not yet support custom npm registries{LINE_ENDING}  Subscribe to https://github.com/envrs/synopkg/issues/220");
   } else if !was_outdated {
     ui::util::print_no_issues_found();
   }

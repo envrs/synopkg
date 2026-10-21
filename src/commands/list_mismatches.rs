@@ -32,7 +32,9 @@ pub fn run(_ctx: Context) -> Result<Context, SynopkgError> {
   eprintln!();
   eprintln!(
     "{}",
-    "https://envrs.github.io/synopkg/guide/migrate-v14#list-mismatches-lint".blue().underline()
+    "https://envrs.github.io/synopkg/guide/migrate-v14#list-mismatches-lint"
+      .blue()
+      .underline()
   );
   eprintln!();
   Err(SynopkgError::DeprecatedCommand)
