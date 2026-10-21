@@ -75,7 +75,7 @@ synopkg fix -h
 
 ### [update](https://envrs.github.io/synopkg/command/update)
 
-Update packages to the latest versions from the npm registry, wherever they are in your monorepo.<br/>Semver range preferences are preserved when updating.
+Update packages to the latest versions from the npm registry, wherever they are in your monorepo, including pnpm catalog entries in `pnpm-workspace.yaml`.<br/>Semver range preferences are preserved when updating.
 
 #### Examples
 
@@ -86,10 +86,20 @@ synopkg update --target latest
 synopkg update --target minor
 # Only update patch versions (1.2.x)
 synopkg update --target patch
+# Pick which updates to apply through an interactive prompt
+synopkg update --interactive
+# Interactively pick from patch updates only
+synopkg update --interactive --target patch
+# Interactively pick which @aws-sdk packages to update
+synopkg update --interactive --dependencies '@aws-sdk/**'
 # Check for outdated dependencies in one package
 synopkg update --check --source 'packages/pingu/package.json'
 # Update dependencies and devDependencies in the whole monorepo
 synopkg update --dependency-types dev,prod
+# Update only pnpm catalog entries in pnpm-workspace.yaml
+synopkg update --dependency-types pnpmCatalog
+# Update only the named pnpm catalog 'react18'
+synopkg update --dependency-types 'pnpmCatalog:react18'
 # Only update dependencies with a semver range specifier (^, ~, etc.)
 synopkg update --specifier-types range
 # Update dependencies where name exactly matches 'react'
