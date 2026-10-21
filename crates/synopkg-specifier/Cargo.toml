@@ -1,0 +1,17 @@
+[package]
+name = "synopkg-specifier"
+version = "15.0.0"
+authors = ["Md Sulaiman <dev.sulaiman@icloud.com>"]
+edition = "2024"
+description = "npm version specifier parser and comparator"
+license = "MIT"
+
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+[[bench]]
+name = "specifier_parsing"
+harness = false
+
+[dependencies]
+node-semver = "2.2.0"

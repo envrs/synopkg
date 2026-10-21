@@ -1,8 +1,11 @@
+[workspace]
+members = ["crates/synopkg-specifier"]
+
 [package]
 name = "synopkg"
-version = "14.0.1"
+version = "15.0.0"
 authors = ["Md Sulaiman <dev.sulaiman@icloud.com>"]
-edition = "2021"
+edition = "2024"
 homepage = "https://envrs.github.io/synopkg"
 repository = "https://github.com/envrs/synopkg/tree/rust/main"
 description = "Consistent dependency versions in large JavaScript Monorepos"
@@ -11,34 +14,35 @@ keywords = ["monorepo", "npm", "pnpm", "semver", "turborepo"]
 readme = "./README.md"
 include = ["src/**/*.rs"]
 
-[dev-dependencies]
-ctor = "0.6.3"
-
 [dependencies]
-async-trait = "0.1.89"
-clap = { version = "4.5.60", features = ["cargo"] }
+async-trait = "0.1.92"
+clap = { version = "4.6.6", features = ["cargo"] }
 color-print = "0.3.7"
 colored = "3.1.1"
-env_logger = "0.11.9"
-glob = "0.3.3"
-globset = "0.4.18"
-indicatif = "0.18.4"
-itertools = "0.14.0"
-lazy_static = "1.5.0"
-log = "0.4.29"
+crossterm = "0.29.0"
+env_logger = "0.11.11"
+globset = "0.4.20"
+ignore = "0.4.33"
+indicatif = "0.18.6"
+itertools = "0.15.0"
+log = "0.4.33"
 node-semver = "2.2.0"
-regex = { version = "1.12.3", default-features = false, features = ["std"] }
+regex = { version = "1.13.1", default-features = false, features = ["std"] }
 reqwest = { version = "0.12", features = [
   "json",
   "rustls-tls",
 ], default-features = false }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = { version = "1.0.149", features = ["preserve_order"] }
-serde_yaml = "0.9"
-thiserror = "2.0.18"
+detect-indent = "0.1.0"
+detect-newline-style = "0.1.2"
+serde = { version = "1.0.229", features = ["derive", "rc"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+synopkg-specifier = { path = "crates/synopkg-specifier" }
+thiserror = "2.0.20"
+yaml_serde = "0.10"
+yamlpatch = "1.29"
+yamlpath = "1.29"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
-ratatui = "0.28"
-crossterm = "0.28"
+unicode-width = "0.2"
 
 [features]
 default = []

@@ -1,37 +1,39 @@
 use {
-  crate::{context::Context, instance::Instance, instance_state::InstanceState},
+  crate::{
+    context::Context,
+    instance::{Instance, InstanceState, Severity},
+  },
   log::error,
 };
 
 #[derive(Debug)]
 pub struct ExpectedInstance {
-  /// The original version on disk
+  /// Original specifier on disk.
   pub actual: &'static str,
-  /// eg "react-dom"
   pub dependency_name: &'static str,
-  /// The specifier synopkg determined the instance should have
+  /// Specifier synopkg determined the instance should have.
   pub expected: Option<&'static str>,
-  /// The instance id
   pub id: &'static str,
-  /// In the case of a semver group being overridden
+  /// Set when a semver group overrode the version group's choice.
   pub overridden: Option<&'static str>,
-  /// The error or valid state synopkg determined the instance is in
+  /// `None` means do not assert severity (lets existing tests stay green
+  /// without per-assertion churn). `Some(s)` asserts the resolved severity
+  /// equals `s`. See `.plans/severity.md` §2.
+  pub severity: Option<Severity>,
   pub state: InstanceState,
 }
 
 #[derive(Debug)]
 pub struct ActualInstance {
-  /// The original version on disk
+  /// Original specifier on disk.
   pub actual: String,
-  /// eg "react-dom"
   pub dependency_name: String,
-  /// The specifier synopkg determined the instance should have
+  /// Specifier synopkg determined the instance should have.
   pub expected: Option<String>,
-  /// The instance id
   pub id: String,
-  /// In the case of a semver group being overridden
+  /// Set when a semver group overrode the version group's choice.
   pub overridden: Option<String>,
-  /// The error or valid state synopkg determined the instance is in
+  pub severity: Option<Severity>,
   pub state: InstanceState,
 }
 
@@ -49,6 +51,7 @@ impl ActualInstance {
       overridden: instance
         .get_specifier_with_preferred_semver_range()
         .map(|expected| expected.get_raw().to_string()),
+      severity: *instance.severity.borrow(),
       state: instance.state.borrow().clone(),
     }
   }
@@ -68,12 +71,7 @@ impl<'a> Expects<'a> {
   }
 
   pub fn to_have_instances(&self, expected_instances: Vec<ExpectedInstance>) -> &Self {
-    let actual_instances = &self
-      .ctx
-      .instances
-      .iter()
-      .map(|instance| ActualInstance::new(instance))
-      .collect::<Vec<ActualInstance>>();
+    let actual_instances = &self.ctx.instances.iter().map(ActualInstance::new).collect::<Vec<ActualInstance>>();
     let actual_len = actual_instances.len();
     let expected_len = expected_instances.len();
     if actual_len != expected_len {
@@ -97,6 +95,7 @@ impl<'a> Expects<'a> {
           && actual.id == id
           && actual.state == state
           && (expected.overridden.is_none() || actual.overridden == overridden_specifier)
+          && (expected.severity.is_none() || actual.severity == expected.severity)
         {
           continue 'expected;
         }

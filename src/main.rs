@@ -1,128 +1,84 @@
+#![allow(dead_code)]
+
 use {
   crate::{
-    cli::{Cli, Subcommand},
-    commands::{fix, fix_mismatches, format, json, lint, lint_semver_ranges, list, list_mismatches, prompt, set_semver_ranges, update},
-    config::Config,
-    context::Context,
-    packages::Packages,
-    registry_client::LiveRegistryClient,
-    visit_formatting::visit_formatting,
-    visit_packages::visit_packages,
+    cli::Cli,
+    disk::LiveDiskIo,
+    errors::SynopkgError,
+    registry::{
+      cache::default_cache_filepath,
+      cached_client::CachedRegistryClient,
+      client::{LiveRegistryClient, RegistryClient},
+    },
+    tui::LiveTui,
   },
+  clap::error::ErrorKind,
   log::{debug, error},
   std::{process::exit, sync::Arc},
 };
 
+mod catalogs;
+#[cfg(test)]
+#[path = "catalogs_test.rs"]
+mod catalogs_test;
+mod cli;
+mod commands;
+mod context;
+mod dependency;
+mod disk;
+mod errors;
+mod group_selector;
+mod instance;
+mod logger;
+mod rcfile;
+mod registry;
+mod source;
+mod source_patterns;
+mod sources;
 #[cfg(test)]
 #[path = "test/test.rs"]
 mod test;
-
-mod catalogs;
-mod cli;
-mod commands;
-mod config;
-mod context;
-mod dependency;
-mod dependency_type;
-mod group_selector;
-mod instance;
-mod instance_state;
-mod logger;
-mod package_json;
-mod packages;
-#[cfg(test)]
-mod packages_test;
-mod pattern_matcher;
-mod rcfile;
-#[cfg(test)]
-mod rcfile_test;
-mod registry_client;
-#[cfg(test)]
-mod registry_client_test;
-mod semver_group;
-mod semver_range;
-mod specifier;
+pub use synopkg_specifier::{self as specifier, semver_range};
+mod synopkg;
+mod tui;
 mod version_group;
 mod visit_formatting;
 mod visit_packages;
 
 #[tokio::main]
 async fn main() {
-  let cli = match Cli::parse() {
-    Ok(cli) => cli,
-    Err(e) => {
-      eprintln!("Error: {}", e);
-      std::process::exit(1);
-    }
-  };
-
-  logger::init(&cli);
-
-  let config = Config::from_cli(cli);
-  let is_update_command = matches!(&config.cli.subcommand, Subcommand::Update);
-
-  debug!("Command: {:?}", config.cli.subcommand);
-  debug!("{:#?}", config.cli);
-  debug!("{:#?}", config.rcfile);
-
-  let packages = Packages::from_config(&config);
-  let catalogs = None; // catalogs::from_config(&config);
-
-  match packages.all.len() {
-    0 => {
-      error!("Found 0 package.json files");
-      exit(1);
-    }
-    len => debug!("Found {len} package.json files"),
-  }
-
-  let ctx = Context::create(
-    config,
-    packages,
-    if is_update_command {
-      Some(Arc::new(LiveRegistryClient::new()))
+  let result = async {
+    logger::init();
+    let args: Vec<String> = std::env::args().collect();
+    let cli = Cli::parse(&args)?;
+    let io = Arc::new(LiveDiskIo::new());
+    let registry_client: Arc<dyn RegistryClient> = if cli.no_cache {
+      Arc::new(LiveRegistryClient::new())
     } else {
-      None
-    },
-    catalogs,
-  );
+      Arc::new(CachedRegistryClient::new(
+        LiveRegistryClient::new(),
+        Arc::clone(&io),
+        default_cache_filepath(),
+      ))
+    };
+    let tui = LiveTui::new();
+    let (ctx, registry_updates) = synopkg::synopkg(cli, &*io, &registry_client).await?;
+    debug!("config: {:#?}", ctx.config);
+    synopkg::run(ctx, registry_updates, &*io, &tui)
+  }
+  .await;
 
-  let _exit_code = match ctx.config.cli.subcommand {
-    Subcommand::Fix => {
-      let ctx = visit_packages(ctx);
-      fix::run(ctx)
+  if let Err(e) = result {
+    if let SynopkgError::CliError(clap_err) = &e
+      && matches!(clap_err.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion)
+    {
+      println!("{clap_err}");
+      return;
     }
-    Subcommand::Format => {
-      let ctx = visit_formatting(ctx);
-      format::run(ctx)
+    let msg = e.to_string();
+    if !msg.is_empty() {
+      error!("{e}");
     }
-    Subcommand::Lint => {
-      let ctx = visit_packages(ctx);
-      lint::run(ctx)
-    }
-    Subcommand::Update => {
-      let mut ctx = ctx;
-      ctx.fetch_all_updates().await;
-      let ctx = visit_packages(ctx);
-      update::run(ctx)
-    }
-    Subcommand::List => {
-      let ctx = visit_packages(ctx);
-      list::run(ctx)
-    }
-    Subcommand::Json => {
-      let ctx = visit_packages(ctx);
-      json::run(ctx)
-    }
-    Subcommand::ListMismatches => list_mismatches::run(),
-    Subcommand::LintSemverRanges => lint_semver_ranges::run(),
-    Subcommand::FixMismatches => fix_mismatches::run(),
-    Subcommand::SetSemverRanges => set_semver_ranges::run(),
-    Subcommand::Prompt => {
-      let ctx = visit_packages(ctx);
-      prompt::run(ctx)
-    }
-  };
-
-  exit(_exit_code);
+    exit(1);
+  }
 }

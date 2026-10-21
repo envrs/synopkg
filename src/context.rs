@@ -1,209 +1,180 @@
 use {
   crate::{
-    catalogs::CatalogsByName,
-    config::Config,
-    dependency::UpdateUrl,
-    instance::Instance,
-    packages::Packages,
-    registry_client::{AllPackageVersions, RegistryClient, RegistryError},
-    specifier::Specifier,
-    version_group::VersionGroup,
+    cli::Cli,
+    dependency::DependencyType,
+    disk::{Disk, PackageManager},
+    errors::{UnsupportedConfigError, UnsupportedConfigErrors},
+    instance::{Instance, InstanceDescriptor, InstanceIdx},
+    rcfile::{Rcfile, from_disk::RcfileError, validate_raw_dep_types},
+    sources::Sources,
+    version_group::{VersionGroup, VersionGroupBehavior},
   },
-  indicatif::{MultiProgress, ProgressBar, ProgressStyle},
-  log::debug,
-  std::{
-    collections::{HashMap, HashSet},
-    rc::Rc,
-    sync::Arc,
-    time::Duration,
-  },
-  tokio::{
-    sync::Semaphore,
-    task::{spawn, JoinHandle},
-  },
+  std::mem,
+  thiserror::Error,
 };
 
+#[cfg(test)]
+#[path = "context_test.rs"]
+mod context_test;
+
+#[derive(Debug, Error)]
+pub enum ContextError {
+  #[error(transparent)]
+  RcfileError(RcfileError),
+}
+
+#[derive(Debug)]
+pub struct Config {
+  pub cli: Cli,
+  pub rcfile: Rcfile,
+}
+
 /// The central data structure that owns all project data.
-///
-/// Context is created once and flows through the 3-phase pipeline using Rust's
-/// ownership system. Each phase takes ownership and returns it:
-/// 1. Context::create() - Read files, collect dependencies
-/// 2. visit_packages() - Assign InstanceState to each instance
-/// 3. command::run() - Process instances, consume Context
-///
-/// See PATTERNS.md "Ownership and Borrowing" section for details.
 #[derive(Debug)]
 pub struct Context {
-  /// If present, the contents of each bun or pnpm catalog. The default catalog
-  /// is keyed under "default" and named by their names.
-  ///
-  /// - https://pnpm.io/catalogs
-  /// - https://bun.sh/docs/pm/catalogs
-  #[allow(dead_code)]
-  pub catalogs: Option<CatalogsByName>,
-  /// All default configuration with user config applied
   pub config: Config,
-  /// The internal names of all failed updates
-  pub failed_updates: Vec<String>,
-  /// Every instance in the project.
-  /// Rc<Instance> is used for single-threaded reference counting - instances
-  /// are shared across version groups without expensive cloning.
-  /// See .cursorrules for when to use Rc vs Arc.
-  pub instances: Vec<Rc<Instance>>,
-  /// Every package.json in the project
-  pub packages: Packages,
-  /// Registry client for fetching package metadata.
-  /// Arc<dyn RegistryClient> is used because the client is shared across
-  /// async tasks (crosses thread boundaries).
-  pub registry_client: Option<Arc<dyn RegistryClient>>,
-  /// All updates from the npm registry which have been chosen either by the
-  /// user via a prompt or automatically by choosing the latest version
-  pub updates_by_internal_name: HashMap<String, Vec<Rc<Specifier>>>,
-  /// All version groups, their dependencies, and their instances
+  /// Mutation goes through `ctx.disk.package_json_files[idx]` or
+  /// `ctx.disk.pnpm_workspace`.
+  pub disk: Disk,
+  pub instances: Vec<Instance>,
+  /// Sole owner of every `Source` reference. Pnpm yaml is a unit-variant
+  /// slot; the actual file lives on `disk.pnpm_workspace`.
+  pub sources: Sources,
   pub version_groups: Vec<VersionGroup>,
 }
 
 impl Context {
-  /// Phase 1 of the 3-phase pipeline: Create Context (read-only).
-  ///
-  /// This function reads all configuration and package.json files, collects
-  /// all dependency instances, and assigns them to version groups.
-  ///
-  /// Important: InstanceState is NOT assigned here - all instances start as
-  /// Unknown. States are assigned later in visit_packages() (Phase 2).
-  ///
-  /// Called from: src/main.rs
-  /// Next step: visit_packages() in src/visit_packages.rs
-  /// See also: .cursorrules for critical invariants
-  pub fn create(
-    config: Config,
-    packages: Packages,
-    registry_client: Option<Arc<dyn RegistryClient>>,
-    catalogs: Option<CatalogsByName>,
-  ) -> Self {
-    let mut instances = vec![];
-    let updates_by_internal_name = HashMap::new();
-    let all_dependency_types = config.rcfile.get_all_dependency_types();
-    let cli_filters = config.cli.get_filters(&packages, &all_dependency_types);
-    let dependency_groups = config.rcfile.get_dependency_groups(&packages, &all_dependency_types);
-    let semver_groups = config.rcfile.get_semver_groups(&packages, &all_dependency_types);
-    let mut version_groups = config.rcfile.get_version_groups(&packages, &all_dependency_types);
+  /// Read all configuration and package.json files, collect all dependency
+  /// instances, and assign them to version groups.
+  pub fn create(mut config: Config, disk: Disk, sources: Sources, dep_types: Vec<DependencyType>) -> Result<Self, ContextError> {
+    // Append catalog dep types BEFORE validation or version-group construction
+    // — user-referenced catalog dep types (e.g. `pnpmCatalog:react18`) must
+    // resolve here.
+    config.rcfile.all_dependency_types.extend(dep_types);
 
-    let failed_updates = Vec::new();
+    // Validate every dep-type-filter selector against the post-discovery list.
+    validate_post_discovery(&config.rcfile)
+      .map_err(|err| vec![err])
+      .map_err(UnsupportedConfigErrors)
+      .map_err(RcfileError::UnsupportedConfig)
+      .map_err(ContextError::RcfileError)?;
 
-    packages.get_all_instances(&all_dependency_types, |mut descriptor| {
-      let dependency_group = dependency_groups.iter().find(|alias| alias.can_add(&descriptor));
+    // Auto-injects `CatalogDefs` when catalog dep types exist.
+    let dependency_groups = mem::take(&mut config.rcfile.dependency_groups);
+    let semver_groups = mem::take(&mut config.rcfile.semver_groups);
+    let update_groups = mem::take(&mut config.rcfile.update_groups);
+    let mut version_groups = config
+      .rcfile
+      .get_version_groups(&sources) // @TODO: Return every error
+      .map_err(|err| vec![err])
+      .map_err(UnsupportedConfigErrors)
+      .map_err(RcfileError::UnsupportedConfig)
+      .map_err(ContextError::RcfileError)?;
+    let all_dependency_types = config.rcfile.all_dependency_types.clone();
+    if let Some(ref filters) = config.cli.filters {
+      filters
+        .validate_dependency_types(&all_dependency_types) // @TODO: Return every error
+        .map_err(|err| vec![err])
+        .map_err(UnsupportedConfigErrors)
+        .map_err(RcfileError::UnsupportedConfig)
+        .map_err(ContextError::RcfileError)?;
+    }
+
+    // Single uniform iteration. Each dep type's `source` field gates which
+    // source kinds it's invoked against. Catalog vs non-catalog branching
+    // reads `dependency_type.is_catalog_definition` at use sites. Descriptors
+    // are owned and consumed directly; package_name is looked up at each use
+    // site via `sources.all[idx].name()` (no String clone per descriptor).
+    let descriptors: Vec<InstanceDescriptor> = sources.iter_instances(&disk, &all_dependency_types).collect();
+
+    let mut instances: Vec<Instance> = Vec::with_capacity(descriptors.len());
+    for mut descriptor in descriptors {
+      let package_name = sources.all[descriptor.source_idx.0].name();
+      let dependency_group = dependency_groups.iter().find(|alias| alias.can_add(&descriptor, package_name));
 
       if let Some(group) = dependency_group {
         descriptor.internal_name = group.label.clone();
       }
 
-      descriptor.matches_cli_filter = match cli_filters.as_ref() {
-        Some(filters) => filters.can_add(&descriptor),
-        None => true,
-      };
-
-      if !descriptor.matches_cli_filter {
-        return;
+      let matches = config.cli.filters.as_ref().is_none_or(|f| f.can_add(&descriptor, package_name));
+      if !matches {
+        continue;
       }
 
       let preferred_semver_range = semver_groups
         .iter()
-        .find(|group| group.selector.can_add(&descriptor))
+        .find(|group| group.selector.can_add(&descriptor, package_name))
         .and_then(|group| group.range.clone());
 
-      let version_group = version_groups.iter_mut().find(|group| group.selector.can_add(&descriptor));
+      let preferred_update_policy = update_groups
+        .iter()
+        .find(|group| group.selector.can_add(&descriptor, package_name))
+        .map(|group| group.policy.clone());
 
-      let instance = Rc::new(Instance::new(descriptor, preferred_semver_range));
+      let version_group = version_groups
+        .iter_mut()
+        .find(|group| group.selector().can_add(&descriptor, package_name));
 
-      instances.push(Rc::clone(&instance));
+      let instance = Instance::new(descriptor, package_name, preferred_semver_range, preferred_update_policy);
+      let idx = InstanceIdx(instances.len());
+      instances.push(instance);
 
       if let Some(group) = version_group {
-        group.add_instance(instance);
+        group.add_instance(idx, &instances[idx.0]);
       }
-    });
+    }
 
-    Self {
-      catalogs,
+    Ok(Self {
       config,
-      failed_updates,
+      disk,
       instances,
-      packages,
-      registry_client,
-      updates_by_internal_name,
+      sources,
       version_groups,
-    }
-  }
-
-  /// Fetch every version specifier ever published for all updateable
-  /// dependencies in the project.
-  pub async fn fetch_all_updates(&mut self) {
-    let client = Arc::clone(self.registry_client.as_ref().expect("Registry client not initialized"));
-    let semaphore = Arc::new(Semaphore::new(self.config.rcfile.max_concurrent_requests));
-    let progress_bars = Arc::new(MultiProgress::new());
-    let mut handles: Vec<(String, JoinHandle<Result<AllPackageVersions, RegistryError>>)> = vec![];
-    let mut all_updates_by_internal_name: HashMap<String, Vec<Rc<Specifier>>> = HashMap::new();
-    let mut failed_updates: Vec<String> = vec![];
-
-    for update_url in self.get_unique_update_urls() {
-      let permit = Arc::clone(&semaphore).acquire_owned().await;
-      let client = Arc::clone(&client);
-      let progress_bars = Arc::clone(&progress_bars);
-
-      handles.push((
-        update_url.internal_name.clone(),
-        spawn(async move {
-          let _permit = permit;
-          let progress_bar = progress_bars.add(ProgressBar::new_spinner());
-          progress_bar.enable_steady_tick(Duration::from_millis(100));
-          progress_bar.set_style(ProgressStyle::default_spinner());
-          progress_bar.set_message(update_url.internal_name.clone());
-          let package_meta = client.fetch(&update_url).await;
-          progress_bar.finish_and_clear();
-          progress_bars.remove(&progress_bar);
-          package_meta
-        }),
-      ));
-    }
-
-    for (internal_name, handle) in handles {
-      match handle.await {
-        Ok(result) => match result {
-          Ok(package_meta) => {
-            let all_updates = all_updates_by_internal_name.entry(internal_name.clone()).or_default();
-            for version in package_meta.versions.iter() {
-              if !version.contains("created") && !version.contains("modified") {
-                all_updates.push(Specifier::new(version));
-              }
-            }
-          }
-          Err(err) => {
-            debug!("{err}");
-            failed_updates.push(internal_name);
-          }
-        },
-        Err(err) => {
-          debug!("{err}");
-          failed_updates.push(internal_name);
-        }
-      }
-    }
-
-    self.updates_by_internal_name = all_updates_by_internal_name;
-    self.failed_updates = failed_updates;
-  }
-
-  /// Return a list of every dependency we should query the registry for
-  /// updates. We use internal names in order to support dependency groups,
-  /// where many dependencies can be aliased as one.
-  fn get_unique_update_urls(&self) -> HashSet<UpdateUrl> {
-    self.version_groups.iter().fold(HashSet::new(), |mut unique_update_urls, group| {
-      group.get_update_urls().inspect(|update_urls| {
-        update_urls.iter().for_each(|url| {
-          unique_update_urls.insert(url.clone());
-        });
-      });
-      unique_update_urls
     })
   }
+
+  /// Detected package manager (lives on Disk; accessor preserves call-site
+  /// ergonomics through the field migration).
+  pub fn package_manager(&self) -> Option<PackageManager> {
+    self.disk.package_manager
+  }
+
+  /// All catalog-def instances for this internal dep name (one per catalog the
+  /// dep appears in across pnpm and Bun). Keys by `descriptor.internal_name`
+  /// so callers inside a `DependencyCore` visit can pass `dep.internal_name`
+  /// directly — this works under `dependency_groups` aliasing because the
+  /// def and its consumers share the same alias label.
+  pub fn catalog_defs_for<'a>(&'a self, internal_name: &'a str) -> impl Iterator<Item = &'a Instance> + 'a {
+    self
+      .instances
+      .iter()
+      .filter(move |i| i.is_catalog_instance() && i.descriptor.internal_name == internal_name)
+  }
+
+  /// Distinct catalog names across the whole project (`"default"` + named).
+  pub fn distinct_catalog_names(&self) -> Vec<&str> {
+    let mut names: Vec<&str> = self.instances.iter().filter_map(|i| i.catalog_name()).collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+  }
+}
+
+/// Validate every dep-type-filter selector (`dependency_groups`,
+/// `semver_groups`, raw `version_groups`) against the post-discovery list of
+/// dependency types.
+fn validate_post_discovery(rcfile: &Rcfile) -> Result<(), UnsupportedConfigError> {
+  for selector in &rcfile.dependency_groups {
+    selector.validate_dependency_types(&rcfile.all_dependency_types)?;
+  }
+  for group in &rcfile.semver_groups {
+    group.selector.validate_dependency_types(&rcfile.all_dependency_types)?;
+  }
+  for group in &rcfile.update_groups {
+    group.selector.validate_dependency_types(&rcfile.all_dependency_types)?;
+  }
+  for group in &rcfile.version_groups {
+    validate_raw_dep_types(&group.dependency_types, &rcfile.all_dependency_types)?;
+  }
+  Ok(())
 }

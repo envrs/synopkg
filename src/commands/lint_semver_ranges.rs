@@ -1,7 +1,10 @@
-use colored::Colorize;
+use {
+  crate::{context::Context, errors::SynopkgError},
+  colored::Colorize,
+};
 
 /// Run the lint-semver-ranges command (deprecated in v14)
-pub fn run() -> i32 {
+pub fn run(_ctx: Context) -> Result<Context, SynopkgError> {
   eprintln!("{}", "Deprecated in synopkg v14".red().bold());
   eprintln!();
   eprintln!("{}", "lint-semver-ranges → lint".yellow().bold());
@@ -38,10 +41,8 @@ pub fn run() -> i32 {
   eprintln!();
   eprintln!(
     "{}",
-    "https://envrs.github.io/synopkg/guide/migrate-v14#lint-semver-ranges-lint"
-      .blue()
-      .underline()
+    "https://envrs.github.io/synopkg/guide/migrate-v14#lint-semver-ranges-lint".blue().underline()
   );
   eprintln!();
-  1
+  Err(SynopkgError::DeprecatedCommand)
 }

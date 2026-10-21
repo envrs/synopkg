@@ -1,7 +1,10 @@
-use colored::Colorize;
+use {
+  crate::{context::Context, errors::SynopkgError},
+  colored::Colorize,
+};
 
 /// Run the fix-mismatches command (deprecated in v14)
-pub fn run() -> i32 {
+pub fn run(_ctx: Context) -> Result<Context, SynopkgError> {
   eprintln!("{}", "Deprecated in synopkg v14".red().bold());
   eprintln!();
   eprintln!("{}", "fix-mismatches → fix".yellow().bold());
@@ -27,12 +30,7 @@ pub fn run() -> i32 {
   eprintln!("  {}", "# v14".dimmed());
   eprintln!("  {}", "synopkg fix".cyan());
   eprintln!();
-  eprintln!(
-    "{}",
-    "https://envrs.github.io/synopkg/guide/migrate-v14#fix-mismatches-fix"
-      .blue()
-      .underline()
-  );
+  eprintln!("{}", "https://envrs.github.io/synopkg/guide/migrate-v14#fix-mismatches-fix".blue().underline());
   eprintln!();
-  1
+  Err(SynopkgError::DeprecatedCommand)
 }
