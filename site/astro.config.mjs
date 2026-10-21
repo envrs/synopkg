@@ -10,7 +10,7 @@ import { tocSchemaMicrodata } from './remark-plugins/toc-schema-microdata.mjs';
 
 export default defineConfig({
   site: 'https://envrs.github.io/synopkg',
-  base: '/',
+  base: '/synopkg',
   output: 'static',
   markdown: {
     smartypants: false,
